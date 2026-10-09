@@ -4,3 +4,7 @@ temp/
 # macOS and build output
 .DS_Store
 build/
+
+# Xcode per-user state
+xcuserdata/
+*.xcresult
