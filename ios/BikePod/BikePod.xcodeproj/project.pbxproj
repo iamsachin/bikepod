@@ -7,8 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1A6A4EE15443E9A14DE7067D /* MapLibreSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B6B1006D993BC2E018E2A9E3 /* MapLibreSwiftUI */; };
+		241ABC5802481155CF537CBE /* PodTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54648A52B85CD664DD5BF890 /* PodTestView.swift */; };
+		29C0206A1541FE58F0C48391 /* FerrostarSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 11B0FB91CB22076E7A5373DD /* FerrostarSwiftUI */; };
+		3BB44CF013A9021A6F58DE89 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = B5499E7E8A6ECA3E97FD309B /* MapLibre */; };
+		4BCFA7A2EB574171618DEC2B /* PlaceSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */; };
+		748DDE20759856ED1D0651C3 /* MapLibreSwiftDSL in Frameworks */ = {isa = PBXBuildFile; productRef = BCEA80ACEED0F99BD269DD2B /* MapLibreSwiftDSL */; };
 		7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8CBCE9D6044DF1591B825BE0 /* FerrostarCore */; };
 		9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BF76FF181C22E9399ED1D6 /* Navigator.swift */; };
+		ACE4B5ABBE9C11A2CB331857 /* FerrostarMapLibreUI in Frameworks */ = {isa = PBXBuildFile; productRef = 614B092DB1664A8DF012AEC7 /* FerrostarMapLibreUI */; };
 		B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93925A49563DA8E4074636DC /* BikePodApp.swift */; };
 		B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221E8EB08715D6EDAC24B568 /* PodLink.swift */; };
 		D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98D798DFA7D8BBE18163179F /* ContentView.swift */; };
@@ -18,7 +25,9 @@
 		221E8EB08715D6EDAC24B568 /* PodLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodLink.swift; sourceTree = "<group>"; };
 		3314AE08E78E36AB0935AEF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BikePod.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		54648A52B85CD664DD5BF890 /* PodTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodTestView.swift; sourceTree = "<group>"; };
 		89BF76FF181C22E9399ED1D6 /* Navigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigator.swift; sourceTree = "<group>"; };
+		8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSearch.swift; sourceTree = "<group>"; };
 		93925A49563DA8E4074636DC /* BikePodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikePodApp.swift; sourceTree = "<group>"; };
 		98D798DFA7D8BBE18163179F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -29,6 +38,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */,
+				ACE4B5ABBE9C11A2CB331857 /* FerrostarMapLibreUI in Frameworks */,
+				29C0206A1541FE58F0C48391 /* FerrostarSwiftUI in Frameworks */,
+				1A6A4EE15443E9A14DE7067D /* MapLibreSwiftUI in Frameworks */,
+				748DDE20759856ED1D0651C3 /* MapLibreSwiftDSL in Frameworks */,
+				3BB44CF013A9021A6F58DE89 /* MapLibre in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -41,7 +55,9 @@
 				93925A49563DA8E4074636DC /* BikePodApp.swift */,
 				98D798DFA7D8BBE18163179F /* ContentView.swift */,
 				89BF76FF181C22E9399ED1D6 /* Navigator.swift */,
+				8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */,
 				221E8EB08715D6EDAC24B568 /* PodLink.swift */,
+				54648A52B85CD664DD5BF890 /* PodTestView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -88,6 +104,11 @@
 			name = BikePod;
 			packageProductDependencies = (
 				8CBCE9D6044DF1591B825BE0 /* FerrostarCore */,
+				614B092DB1664A8DF012AEC7 /* FerrostarMapLibreUI */,
+				11B0FB91CB22076E7A5373DD /* FerrostarSwiftUI */,
+				B6B1006D993BC2E018E2A9E3 /* MapLibreSwiftUI */,
+				BCEA80ACEED0F99BD269DD2B /* MapLibreSwiftDSL */,
+				B5499E7E8A6ECA3E97FD309B /* MapLibre */,
 			);
 			productName = BikePod;
 			productReference = 4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */;
@@ -119,6 +140,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */,
+				80E8533CDFF3F10DFC6FE038 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
+				BA8B1F9196ECA8E44AA1465A /* XCRemoteSwiftPackageReference "swiftui-dsl" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9DA716007D1249C4EA3192DD /* Products */;
@@ -138,7 +161,9 @@
 				B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */,
 				D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */,
 				9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */,
+				4BCFA7A2EB574171618DEC2B /* PlaceSearch.swift in Sources */,
 				B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */,
+				241ABC5802481155CF537CBE /* PodTestView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -338,13 +363,54 @@
 				version = 0.57.0;
 			};
 		};
+		80E8533CDFF3F10DFC6FE038 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/maplibre/maplibre-gl-native-distribution.git";
+			requirement = {
+				kind = exactVersion;
+				version = 6.31.0;
+			};
+		};
+		BA8B1F9196ECA8E44AA1465A /* XCRemoteSwiftPackageReference "swiftui-dsl" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/maplibre/swiftui-dsl";
+			requirement = {
+				kind = exactVersion;
+				version = 0.25.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		11B0FB91CB22076E7A5373DD /* FerrostarSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */;
+			productName = FerrostarSwiftUI;
+		};
+		614B092DB1664A8DF012AEC7 /* FerrostarMapLibreUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */;
+			productName = FerrostarMapLibreUI;
+		};
 		8CBCE9D6044DF1591B825BE0 /* FerrostarCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */;
 			productName = FerrostarCore;
+		};
+		B5499E7E8A6ECA3E97FD309B /* MapLibre */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 80E8533CDFF3F10DFC6FE038 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
+			productName = MapLibre;
+		};
+		B6B1006D993BC2E018E2A9E3 /* MapLibreSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BA8B1F9196ECA8E44AA1465A /* XCRemoteSwiftPackageReference "swiftui-dsl" */;
+			productName = MapLibreSwiftUI;
+		};
+		BCEA80ACEED0F99BD269DD2B /* MapLibreSwiftDSL */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BA8B1F9196ECA8E44AA1465A /* XCRemoteSwiftPackageReference "swiftui-dsl" */;
+			productName = MapLibreSwiftDSL;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

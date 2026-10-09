@@ -17,18 +17,24 @@ final class Navigator {
     enum Phase: Equatable {
         case idle
         case routing
+        case preview(Route)       // route found, shown on the map, not started yet
         case navigating
         case arrived
         case failed(String)
     }
 
     private(set) var phase: Phase = .idle
+    private(set) var destinationName = ""
     private(set) var instruction = ""
     private(set) var distanceToTurn = 0
     private(set) var remainingKm = 0.0
     private(set) var rerouting = false
+    /// Full Ferrostar state, for the in-app navigation map
+    private(set) var navState: NavigationState?
+    private(set) var isMuted = false
 
     var hasGPS: Bool { device.lastLocation != nil }
+    var currentCoordinate: CLLocationCoordinate2D? { device.lastLocation?.clLocation.coordinate }
 
     private let link: PodLink
     private let device = CoreLocationProvider(activityType: .automotiveNavigation,
@@ -37,81 +43,113 @@ final class Navigator {
     private var core: FerrostarCore?
     @ObservationIgnored private var stateWatch: AnyCancellable?
     @ObservationIgnored private var lastPodMessage = ""
+    @ObservationIgnored private var routeRequestID = UUID()
 
     init(link: PodLink) {
         self.link = link
         device.startUpdating()   // also triggers the location permission prompt
     }
 
-    /// - Parameters:
-    ///   - simulate: replay the route with fake GPS instead of riding it
-    ///   - speedUp: simulation speed multiplier (1 = about 36 km/h)
-    func start(to destination: CLLocationCoordinate2D, simulate: Bool, speedUp: UInt64) async {
+    private static let config = SwiftNavigationControllerConfig(
+        waypointAdvance: .waypointWithinRange(100.0),
+        stepAdvanceCondition: stepAdvanceDistanceEntryAndExit(
+            distanceToEndOfStep: 30,
+            distanceAfterEndOfStep: 5,
+            minimumHorizontalAccuracy: 32
+        ),
+        arrivalStepAdvanceCondition: stepAdvanceDistanceToEndOfStep(
+            distance: 10,
+            minimumHorizontalAccuracy: 32
+        ),
+        routeDeviationTracking: .staticThreshold(minimumHorizontalAccuracy: 25, maxAcceptableDeviation: 50),
+        snappedLocationCourseFiltering: .snapToRoute
+    )
+
+    private static func makeCore(_ provider: LocationProviding) throws -> FerrostarCore {
+        try FerrostarCore(
+            wellKnownRouteProvider: .valhalla(endpointUrl: valhallaURL, profile: "motorcycle"),
+            locationProvider: provider,
+            navigationControllerConfig: config
+        )
+    }
+
+    /// Step 1: ask Valhalla for a motorcycle route from here and show it.
+    func planRoute(to destination: CLLocationCoordinate2D, name: String) async {
         stop()
         guard let origin = device.lastLocation else {
             phase = .failed("No GPS position yet. Wait a few seconds and try again.")
             return
         }
+        destinationName = name
         phase = .routing
-
-        let provider: LocationProviding = simulate ? simulated : device
-        let config = SwiftNavigationControllerConfig(
-            waypointAdvance: .waypointWithinRange(100.0),
-            stepAdvanceCondition: stepAdvanceDistanceEntryAndExit(
-                distanceToEndOfStep: 30,
-                distanceAfterEndOfStep: 5,
-                minimumHorizontalAccuracy: 32
-            ),
-            arrivalStepAdvanceCondition: stepAdvanceDistanceToEndOfStep(
-                distance: 10,
-                minimumHorizontalAccuracy: 32
-            ),
-            routeDeviationTracking: .staticThreshold(minimumHorizontalAccuracy: 25, maxAcceptableDeviation: 50),
-            snappedLocationCourseFiltering: .snapToRoute
-        )
-
+        let requestID = UUID()
+        routeRequestID = requestID
         do {
-            let core = try FerrostarCore(
-                wellKnownRouteProvider: .valhalla(endpointUrl: Self.valhallaURL, profile: "motorcycle"),
-                locationProvider: provider,
-                navigationControllerConfig: config
-            )
-            self.core = core
-            let routes = try await core.getRoutes(
+            let router = try Self.makeCore(device)
+            let routes = try await router.getRoutes(
                 initialLocation: origin,
                 waypoints: [Waypoint(coordinate: GeographicCoordinate(lat: destination.latitude,
                                                                        lng: destination.longitude),
                                      kind: .break)]
             )
-            guard self.core === core else { return }   // stopped while the route was loading
+            guard routeRequestID == requestID else { return }   // cancelled or replaced meanwhile
             guard let route = routes.first else {
                 phase = .failed("No route found to that destination.")
                 return
             }
+            phase = .preview(route)
+        } catch {
+            guard routeRequestID == requestID else { return }
+            phase = .failed("Routing failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Step 2: start guidance on the previewed route.
+    /// - Parameters:
+    ///   - simulate: replay the route with fake GPS instead of riding it
+    ///   - speedUp: simulation speed multiplier (1 = about 36 km/h)
+    func startNavigation(simulate: Bool, speedUp: UInt64) {
+        guard case let .preview(route) = phase else { return }
+        do {
+            let core = try Self.makeCore(simulate ? simulated : device)
             if simulate {
                 simulated.warpFactor = max(1, speedUp)
                 // One simulated GPS point every 10 m, once per second (divided by the speed-up)
                 try simulated.setSimulatedRoute(route, resampleDistance: 10)
             }
+            if core.spokenInstructionObserver.isMuted != isMuted {
+                core.spokenInstructionObserver.toggleMute()
+            }
+            self.core = core
             stateWatch = core.$state
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] state in self?.handle(state) }
             try core.startNavigation(route: route)
             phase = .navigating
         } catch {
-            phase = .failed("Routing failed: \(error.localizedDescription)")
+            phase = .failed("Could not start navigation: \(error.localizedDescription)")
+        }
+    }
+
+    func toggleMute() {
+        isMuted.toggle()
+        if let observer = core?.spokenInstructionObserver, observer.isMuted != isMuted {
+            observer.toggleMute()
         }
     }
 
     func stop() {
+        routeRequestID = UUID()
         stateWatch = nil
         core?.stopNavigation()
         core = nil
+        navState = nil
         lastPodMessage = ""
         if phase != .idle { phase = .idle }
     }
 
     private func handle(_ state: NavigationState?) {
+        navState = state
         guard let state else { return }
         rerouting = state.isCalculatingNewRoute
 

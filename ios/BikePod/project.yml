@@ -9,6 +9,12 @@ packages:
   Ferrostar:
     url: https://github.com/stadiamaps/ferrostar
     exactVersion: 0.57.0
+  MapLibreSwiftUI:            # same versions Ferrostar 0.57.0 resolves to
+    url: https://github.com/maplibre/swiftui-dsl
+    exactVersion: 0.25.0
+  MapLibre:
+    url: https://github.com/maplibre/maplibre-gl-native-distribution.git
+    exactVersion: 6.31.0
 
 targets:
   BikePod:
@@ -20,6 +26,16 @@ targets:
     dependencies:
       - package: Ferrostar
         product: FerrostarCore
+      - package: Ferrostar
+        product: FerrostarMapLibreUI
+      - package: Ferrostar
+        product: FerrostarSwiftUI
+      - package: MapLibreSwiftUI
+        product: MapLibreSwiftUI
+      - package: MapLibreSwiftUI
+        product: MapLibreSwiftDSL
+      - package: MapLibre
+        product: MapLibre
     info:
       path: Resources/Info.plist
       properties:
