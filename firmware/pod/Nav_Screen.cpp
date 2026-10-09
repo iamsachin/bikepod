@@ -5,6 +5,8 @@
                     Black background, white text, one blue accent; amber for rerouting.
 ******************************************************************************/
 #include "Nav_Screen.h"
+#include "Map_Layer.h"
+#include <esp_heap_caps.h>
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -36,11 +38,11 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 
 // Route drawing area (screen coordinates) and where the rider's marker sits inside it
 #define PATH_X          0         // full width: the round screen itself crops the drawing
-#define PATH_Y          212
+#define PATH_Y          196
 #define PATH_W          480
-#define PATH_H          170
+#define PATH_H          196
 #define MARKER_X        (PATH_W / 2)
-#define MARKER_Y        122
+#define MARKER_Y        138
 #define PATH_LINE       14
 #define PATH_MAX_POINTS 24
 #define MAX_STUBS       16
@@ -64,6 +66,7 @@ static lv_obj_t *path_behind;
 static lv_obj_t *path_ahead;
 static lv_obj_t *path_head;
 static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
+static lv_obj_t *world;           // map + route + stubs: slides forward between GPS updates
 
 static lv_obj_t *info_group;      // waiting / rerouting / arrived / cruise
 static lv_obj_t *icon_target;
@@ -74,6 +77,8 @@ static lv_obj_t *info_sub;
 static lv_obj_t *info_detail;
 static lv_obj_t *spinner;         // amber arc running round the edge while rerouting
 static lv_timer_t *spinner_timer;
+
+static void Glide_Reset(void);
 
 static Screen_Mode mode = MODE_WAITING;
 static bool stale = false;
@@ -342,9 +347,10 @@ static void Draw_Stubs(void)
   // Stubs arrive nearest first. In dense areas, zoomed out, many lanes would pile up into a
   // striped blob, so skip junctions too close to one already drawn and cap the number shown.
   float length = LV_CLAMP(STUB_MIN_PX, STUB_METRES * path_scale, STUB_MAX_PX);
+  bool map_shown = Map_Layer_Has_Map();      // the real streets are drawn: no stubs needed
   lv_point_t drawn[MAX_STUBS];
   uint8_t n_drawn = 0, n_lines = 0;
-  for (uint8_t i = 0; i < stub_count && path_scale > 0; i++) {
+  for (uint8_t i = 0; i < stub_count && path_scale > 0 && !map_shown; i++) {
     lv_point_t at = { (lv_coord_t)lroundf(MARKER_X + stub_data[i][0] * path_scale),
                       (lv_coord_t)lroundf(MARKER_Y - stub_data[i][1] * path_scale) };
     bool same_junction = false, too_close = false;
@@ -384,8 +390,10 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
   // Zoom so the turn sits about 78 px ahead of the rider (room above for the exit and its side
   // streets); ease zoom changes between updates
   float target = 78.0f / LV_MAX((float)turn_distance_m, 30.0f);
-  target = LV_CLAMP(0.3f, target, 2.6f);
+  target = LV_CLAMP(0.55f, target, 2.6f);   // not further out: the map area would end on screen
   path_scale = path_scale == 0 ? target : path_scale * 0.6f + target * 0.4f;
+  Map_Layer_Set_Scale(path_scale);
+  Glide_Reset();
   Draw_Stubs();
 
   // The rider's position is the (0,0) point: before it is ridden, after it is ahead
@@ -512,6 +520,71 @@ static lv_obj_t *Edge_Arc(lv_obj_t *parent, lv_color_t color)
   return arc;
 }
 
+/******************************** Soft edges and glide ********************************/
+// The map fades into black at the screen's rim and towards the text above and below,
+// through an alpha-only image laid over it (LVGL can't blur live; a fixed fade looks the same).
+static lv_img_dsc_t vignette;
+
+static float Smoothstep(float edge0, float edge1, float x)
+{
+  float t = LV_CLAMP(0.0f, (x - edge0) / (edge1 - edge0), 1.0f);
+  return t * t * (3 - 2 * t);
+}
+
+static void Vignette_Create(lv_obj_t *parent)
+{
+  uint8_t *alpha = (uint8_t *)heap_caps_malloc(PATH_W * PATH_H, MALLOC_CAP_SPIRAM);
+  if (!alpha) return;
+  for (int y = 0; y < PATH_H; y++) {
+    for (int x = 0; x < PATH_W; x++) {
+      float dx = PATH_X + x - 240, dy = PATH_Y + y - 240;
+      float rim = Smoothstep(165, 226, sqrtf(dx * dx + dy * dy));   // towards the round edge
+      float top = 1 - Smoothstep(0, 60, y);                          // under the road name
+      float bottom = 1 - Smoothstep(0, 50, PATH_H - 1 - y);         // above the arrival time
+      float a = LV_MAX(rim, LV_MAX(top, bottom));
+      alpha[y * PATH_W + x] = (uint8_t)lroundf(a * 255);
+    }
+  }
+  vignette.header.cf = LV_IMG_CF_ALPHA_8BIT;
+  vignette.header.w = PATH_W;
+  vignette.header.h = PATH_H;
+  vignette.data_size = PATH_W * PATH_H;
+  vignette.data = alpha;
+  lv_obj_t *img = lv_img_create(parent);
+  lv_img_set_src(img, &vignette);
+  lv_obj_set_style_img_recolor(img, lv_color_black(), 0);    // alpha-only images take this colour
+  lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
+  lv_obj_set_pos(img, 0, 0);
+}
+
+// Between GPS updates (about once a second) keep the picture moving at the measured speed,
+// so the map slides under the marker instead of jumping. Reset when a new route shape arrives.
+#define GLIDE_FRAME_MS   20        // ~50 fps: a map frame takes ~12 ms to draw
+#define GLIDE_MAX_MS     1500
+static float speed_mps = 0;               // from how fast the distance to the turn shrinks
+static uint32_t path_time_ms = 0;
+static uint32_t dist_time_ms = 0;
+static lv_coord_t glide_px = 0;
+
+static void Glide_Frame(lv_timer_t *timer)
+{
+  if (mode != MODE_TURN || speed_mps <= 0 || path_scale <= 0) return;
+  uint32_t elapsed = LV_MIN(lv_tick_elaps(path_time_ms), GLIDE_MAX_MS);
+  lv_coord_t px = (lv_coord_t)lroundf(speed_mps * elapsed / 1000.0f * path_scale);
+  if (px == glide_px) return;
+  glide_px = px;
+  lv_obj_set_style_translate_y(world, glide_px, 0);   // moving forward = the world slides down
+}
+
+static void Glide_Reset(void)
+{
+  path_time_ms = lv_tick_get();
+  if (glide_px != 0) {
+    glide_px = 0;
+    lv_obj_set_style_translate_y(world, 0, 0);
+  }
+}
+
 void Nav_Screen_Create(void)
 {
   lv_obj_t *scr = lv_scr_act();
@@ -541,6 +614,25 @@ void Nav_Screen_Create(void)
   /* Turn screen */
   turn_group = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
 
+  // Map and route drawing first, so the header and road name are drawn over its faded top.
+  // Clipped to its own band; the round screen crops the sides.
+  lv_obj_t *path_area = Plain_Box(turn_group, PATH_W, PATH_H);
+  lv_obj_set_pos(path_area, PATH_X, PATH_Y);
+  world = Plain_Box(path_area, PATH_W, PATH_H);
+  Map_Layer_Create(world, PATH_W, PATH_H, MARKER_X, MARKER_Y);
+  for (uint8_t i = 0; i < MAX_STUBS; i++) {             // created first, so they sit under the route
+    stub_lines[i] = Line_Create(world, STUB_LINE, COLOR_STUB, LV_OPA_COVER);
+    lv_obj_add_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  // Solid colours: see-through segments overlap at every joint and look blotchy
+  path_behind = Line_Create(world, PATH_LINE - 2, COLOR_PATH_DONE, LV_OPA_COVER);
+  path_ahead = Line_Create(world, PATH_LINE, COLOR_PATH, LV_OPA_COVER);
+  path_head = Line_Create(world, PATH_LINE - 3, COLOR_PATH, LV_OPA_COVER);
+  Path_Clear();
+  Vignette_Create(path_area);
+  Marker_Create(path_area);
+  lv_timer_create(Glide_Frame, GLIDE_FRAME_MS, NULL);
+
   // Header: arrow, distance and unit on one line, sharing a baseline
   lv_obj_t *header = Plain_Box(turn_group, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
@@ -561,20 +653,6 @@ void Nav_Screen_Create(void)
   lv_obj_set_width(road_label, 380);
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
   lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 172);
-
-  // Route drawing, clipped to its own area so it never runs into the text
-  lv_obj_t *path_area = Plain_Box(turn_group, PATH_W, PATH_H);
-  lv_obj_set_pos(path_area, PATH_X, PATH_Y);
-  for (uint8_t i = 0; i < MAX_STUBS; i++) {             // created first, so they sit under the route
-    stub_lines[i] = Line_Create(path_area, STUB_LINE, COLOR_STUB, LV_OPA_COVER);
-    lv_obj_add_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
-  }
-  // Solid colours: see-through segments overlap at every joint and look blotchy
-  path_behind = Line_Create(path_area, PATH_LINE - 2, COLOR_PATH_DONE, LV_OPA_COVER);
-  path_ahead = Line_Create(path_area, PATH_LINE, COLOR_PATH, LV_OPA_COVER);
-  path_head = Line_Create(path_area, PATH_LINE - 3, COLOR_PATH, LV_OPA_COVER);
-  Path_Clear();
-  Marker_Create(path_area);
 
   /* Shared bottom line: arrival time and distance left */
   eta_label = Label_Create(scr, &font_text_32, COLOR_SOFT);
@@ -662,6 +740,12 @@ void Nav_Screen_Set_Stale(bool now_stale)
   lv_obj_set_style_opa(ring_tip, opa, 0);
 }
 
+void Nav_Screen_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
+{
+  Map_Layer_Set_Pose(area_id, x, y, heading_deg);
+  Draw_Stubs();                              // hidden once the map is showing
+}
+
 Screen_Mode Nav_Screen_Mode(void)
 {
   return mode;
@@ -674,7 +758,16 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
     Ring_Set_Fixed(0);   // a fresh approach after another screen
     path_scale = 0;
   }
-  if (distance_m > turn_distance_m + 30) path_scale = 0;   // a new turn: snap the zoom, don't ease
+  if (distance_m > turn_distance_m + 30) {
+    path_scale = 0;                         // a new turn: snap the zoom, don't ease
+  } else if (distance_m < turn_distance_m) {
+    uint32_t dt = lv_tick_elaps(dist_time_ms);
+    if (dt > 200 && dt < 4000) {
+      float measured = (turn_distance_m - distance_m) * 1000.0f / dt;
+      speed_mps = speed_mps == 0 ? measured : speed_mps * 0.6f + measured * 0.4f;
+    }
+  }
+  if (distance_m != turn_distance_m) dist_time_ms = lv_tick_get();
   turn_distance_m = distance_m;
 
   switch (dir) {

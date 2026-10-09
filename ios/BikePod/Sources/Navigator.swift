@@ -50,6 +50,9 @@ final class Navigator {
     @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
     @ObservationIgnored private var pathLine = ""          // latest "PATH|..." route drawing
     @ObservationIgnored private var stubLine = ""          // latest "STUB|..." side streets
+    @ObservationIgnored private var poseLine = ""          // latest "POSE|..." rider in the map area
+    @ObservationIgnored private var mapSentForConnection = -1
+    private let mapFeed = MapFeed()
     /// Sees Valhalla's raw answers on their way into Ferrostar, to keep the junction details
     private let junctionCapture = JunctionCapture()
     @ObservationIgnored private var pathAlong: Double?     // rider's last position along the route, metres
@@ -153,6 +156,7 @@ final class Navigator {
             tripLine = ""
             pathLine = ""
             stubLine = ""
+            poseLine = ""
             pathAlong = nil
             phase = .navigating
         } catch {
@@ -177,6 +181,7 @@ final class Navigator {
         tripLine = ""
         pathLine = ""
         stubLine = ""
+        poseLine = ""
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -217,6 +222,12 @@ final class Navigator {
                                          junctions: junctions) {
             pathAlong = result.along
             pathLine = "PATH|" + result.shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
+            // Street map: same origin and heading as the route drawing, so they line up
+            let origin = result.origin
+            poseLine = mapFeed.pose(lat: origin.lat, lng: origin.lng, headingDegrees: result.headingDegrees) ?? ""
+            if mapFeed.needsArea(lat: origin.lat, lng: origin.lng) {
+                mapFeed.buildArea(lat: origin.lat, lng: origin.lng) { [weak self] lines in self?.sendMapArea(lines) }
+            }
             stubLine = "STUB|" + result.stubs.map { "\($0.x),\($0.y),\($0.angle)" + ($0.atTurn ? ",1" : "") }
                 .joined(separator: ";")
         }
@@ -236,7 +247,7 @@ final class Navigator {
             if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
             // Turn first: the pod sizes the route drawing from the turn distance
-            return [("turn", turnLine), ("path", pathLine), ("stub", stubLine), ("trip", tripLine)]
+            return [("turn", turnLine), ("pose", poseLine), ("path", pathLine), ("stub", stubLine), ("trip", tripLine)]
                 .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
@@ -252,14 +263,24 @@ final class Navigator {
     /// Sends each line when it changes, and repeats it every 2 s as a keepalive:
     /// the pod fades its screen if it hears nothing for 8 s.
     /// Route drawings go at most 4 times a second so a fast simulation can't flood the link.
+    /// A whole map area: ~100-250 lines, sent once per area (and again after a reconnect)
+    private func sendMapArea(_ lines: [String]) {
+        guard !podFeedPaused, link.state == .connected else { return }
+        for line in lines { link.send(line: line) }
+        mapSentForConnection = link.connectionID
+    }
+
     private func updatePod() {
         guard !podFeedPaused else { return }
+        if phase == .navigating, !mapFeed.areaLines.isEmpty, mapSentForConnection != link.connectionID {
+            sendMapArea(mapFeed.areaLines)          // the pod reconnected (or restarted): it has no map
+        }
         let now = Date()
         for (kind, line) in podLines {
             let last = lastPodSent[kind]
             let age = now.timeIntervalSince(last?.at ?? .distantPast)
             let changed = line != last?.line
-            let throttled = kind == "path" || kind == "stub"
+            let throttled = kind == "path" || kind == "stub" || kind == "pose"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
             link.send(line: line)

@@ -12,6 +12,8 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count);
 // Side streets: junction x,y in the same metres frame as the path, angle clockwise from ahead,
 // and a flag for streets at the turn (drawn across the screen)
 void Nav_Screen_Set_Stubs(const int16_t (*stubs)[4], uint8_t count);
+// Rider's position and heading in the current map area's frame (see Map_Layer.h)
+void Nav_Screen_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg);
 // Bottom line on the turn and rerouting screens: arrival time and kilometres left
 void Nav_Screen_Set_Trip(const char *eta, float km_left);
 void Nav_Screen_Show_Waiting(void);

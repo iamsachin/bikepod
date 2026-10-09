@@ -10,6 +10,7 @@
 #include "BLE_Link.h"
 
 volatile bool screenshot_sending = false;
+bool perf_report = false;
 
 #define RUNS_PER_LINE 48                       // 192 raw bytes -> 256 base64 characters
 
@@ -59,7 +60,7 @@ static void Screenshot_Send(void)
   screenshot_sending = false;
 }
 
-// Serial commands from the Mac: "shot", "msg <line>" (inject a phone line), "test off"
+// Serial commands from the Mac: "shot", "msg <line>" (inject a phone line), "test off", "perf"
 void Screenshot_Poll(void)
 {
   static char cmd[256];
@@ -71,6 +72,7 @@ void Screenshot_Poll(void)
       if (strcmp(cmd, "shot") == 0) Screenshot_Send();
       else if (strncmp(cmd, "msg ", 4) == 0) BLE_Link_Inject(String(cmd + 4));
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();
+      else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
       len = 0;
     } else if (len < sizeof(cmd) - 1) {
       cmd[len++] = c;

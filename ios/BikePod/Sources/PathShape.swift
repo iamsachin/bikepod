@@ -25,7 +25,8 @@ enum PathShape {
     /// - Returns: the shape, side-street stubs, and the rider's position along the route to pass in next time.
     static func around(rider: GeographicCoordinate, route: [GeographicCoordinate],
                        metresToTurn: Double, previousAlong: Double? = nil, junctions: [Junction] = [])
-        -> (shape: [(x: Int, y: Int)], stubs: [Stub], along: Double)? {
+        -> (shape: [(x: Int, y: Int)], stubs: [Stub], along: Double,
+            origin: (lat: Double, lng: Double), headingDegrees: Double)? {
         guard route.count >= 2 else { return nil }
 
         // Flat local projection in metres around the rider (fine over a few hundred metres)
@@ -111,7 +112,9 @@ enum PathShape {
             }
         }
         stubs.sort { $0.distance < $1.distance }
-        return (result, stubs.prefix(maxStubs).map(\.stub), s0)
+        // Where the drawing's (0,0) is on Earth, and its heading: the map uses the same view
+        let originLatLng = (lat: rider.lat + origin.y / metresPerDegLat, lng: rider.lng + origin.x / metresPerDegLng)
+        return (result, stubs.prefix(maxStubs).map(\.stub), s0, originLatLng, headingDegrees)
     }
 
     /// Douglas-Peucker line simplification; keeps both end points.

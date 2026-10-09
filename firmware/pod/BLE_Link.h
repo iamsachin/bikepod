@@ -11,6 +11,11 @@
 //   STUB|40,85,270,1;...      side streets: junction x,y (metres, same frame as PATH), the
 //                             street's direction in degrees clockwise from straight ahead, and
 //                             optionally ",1" when the junction is the turn (drawn long)
+//   MAPBEGIN|7                start of map area 7 (roads around the rider, see Map_Layer.h)
+//   MAP|7|2|-120,40;-80,35;.. one road of area 7: class (1 major, 2 medium, 3 minor), points in
+//                             metres north-up from the area's reference point
+//   MAPEND|7|96               area 7 complete with 96 roads: the pod switches to it
+//   POSE|7|12,-40,85          rider in area 7's frame: x, y metres and heading in degrees
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -22,7 +27,7 @@
 #define NAV_PATH_MAX_POINTS   24
 #define NAV_MAX_STUBS         16
 
-enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
+enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_POSE, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
 
 struct Nav_Message {
   Msg_Kind kind;
@@ -40,6 +45,9 @@ struct Nav_Message {
   // MSG_PATH
   uint8_t path_count;
   int16_t path[NAV_PATH_MAX_POINTS][2];
+  // MSG_POSE
+  uint16_t area_id;
+  int16_t pose[3];                          // x, y, heading
   // MSG_STUB
   uint8_t stub_count;
   int16_t stubs[NAV_MAX_STUBS][4];        // x, y, angle, at-turn flag

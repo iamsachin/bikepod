@@ -15,23 +15,29 @@
 		748DDE20759856ED1D0651C3 /* MapLibreSwiftDSL in Frameworks */ = {isa = PBXBuildFile; productRef = BCEA80ACEED0F99BD269DD2B /* MapLibreSwiftDSL */; };
 		7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8CBCE9D6044DF1591B825BE0 /* FerrostarCore */; };
 		89BCBD750A12B4F9B4086B6D /* PathShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16B1117B4E5FF5B1D498373 /* PathShape.swift */; };
+		986E97582A2FA574DDA76FD3 /* MapArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C76E28EF65BA10A60CC07C /* MapArea.swift */; };
 		9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BF76FF181C22E9399ED1D6 /* Navigator.swift */; };
+		9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B8E3DEB099F516B18C47F /* VectorTile.swift */; };
 		ACE4B5ABBE9C11A2CB331857 /* FerrostarMapLibreUI in Frameworks */ = {isa = PBXBuildFile; productRef = 614B092DB1664A8DF012AEC7 /* FerrostarMapLibreUI */; };
 		B148A68C2D7AD5510A7F9FDC /* JunctionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADF3C7FA650E4CFE35E1FD1 /* JunctionCapture.swift */; };
 		B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93925A49563DA8E4074636DC /* BikePodApp.swift */; };
 		B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221E8EB08715D6EDAC24B568 /* PodLink.swift */; };
 		D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98D798DFA7D8BBE18163179F /* ContentView.swift */; };
+		ED9F3523316EEFFF2867925F /* MapFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D47BD68CE41B64E0D79683 /* MapFeed.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		17D47BD68CE41B64E0D79683 /* MapFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapFeed.swift; sourceTree = "<group>"; };
 		221E8EB08715D6EDAC24B568 /* PodLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodLink.swift; sourceTree = "<group>"; };
 		3314AE08E78E36AB0935AEF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		44C76E28EF65BA10A60CC07C /* MapArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapArea.swift; sourceTree = "<group>"; };
 		4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BikePod.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		54648A52B85CD664DD5BF890 /* PodTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodTestView.swift; sourceTree = "<group>"; };
 		89BF76FF181C22E9399ED1D6 /* Navigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigator.swift; sourceTree = "<group>"; };
 		8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSearch.swift; sourceTree = "<group>"; };
 		93925A49563DA8E4074636DC /* BikePodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikePodApp.swift; sourceTree = "<group>"; };
 		98D798DFA7D8BBE18163179F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		DF8B8E3DEB099F516B18C47F /* VectorTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorTile.swift; sourceTree = "<group>"; };
 		E16B1117B4E5FF5B1D498373 /* PathShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathShape.swift; sourceTree = "<group>"; };
 		FADF3C7FA650E4CFE35E1FD1 /* JunctionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JunctionCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -59,11 +65,14 @@
 				93925A49563DA8E4074636DC /* BikePodApp.swift */,
 				98D798DFA7D8BBE18163179F /* ContentView.swift */,
 				FADF3C7FA650E4CFE35E1FD1 /* JunctionCapture.swift */,
+				44C76E28EF65BA10A60CC07C /* MapArea.swift */,
+				17D47BD68CE41B64E0D79683 /* MapFeed.swift */,
 				89BF76FF181C22E9399ED1D6 /* Navigator.swift */,
 				E16B1117B4E5FF5B1D498373 /* PathShape.swift */,
 				8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */,
 				221E8EB08715D6EDAC24B568 /* PodLink.swift */,
 				54648A52B85CD664DD5BF890 /* PodTestView.swift */,
+				DF8B8E3DEB099F516B18C47F /* VectorTile.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -167,11 +176,14 @@
 				B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */,
 				D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */,
 				B148A68C2D7AD5510A7F9FDC /* JunctionCapture.swift in Sources */,
+				986E97582A2FA574DDA76FD3 /* MapArea.swift in Sources */,
+				ED9F3523316EEFFF2867925F /* MapFeed.swift in Sources */,
 				9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */,
 				89BCBD750A12B4F9B4086B6D /* PathShape.swift in Sources */,
 				4BCFA7A2EB574171618DEC2B /* PlaceSearch.swift in Sources */,
 				B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */,
 				241ABC5802481155CF537CBE /* PodTestView.swift in Sources */,
+				9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -32,6 +32,8 @@ final class PodLink: NSObject {
 
     private(set) var state: State = .bluetoothOff
     private(set) var lastSent: String = ""
+    /// Goes up by one on every (re)connection, so senders know when the pod needs a full resend
+    private(set) var connectionID = 0
 
     private var central: CBCentralManager!
     private var pod: CBPeripheral?
@@ -104,6 +106,9 @@ extension PodLink: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         navChar = service.characteristics?.first(where: { $0.uuid == Self.navCharUUID })
-        if navChar != nil { state = .connected }
+        if navChar != nil {
+            connectionID += 1
+            state = .connected
+        }
     }
 }

@@ -10,6 +10,7 @@
 #include "Nav_Screen.h"
 #include "BLE_Link.h"
 #include "Screenshot.h"
+#include "Map_Layer.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -36,6 +37,8 @@ static void Show_Turn(const Nav_Message &msg)
 
 static void Pod_Tick(lv_timer_t *timer)
 {
+  Map_Layer_Poll();
+
   if (!BLE_Link_Connected()) {
     if (Nav_Screen_Mode() != MODE_WAITING) Nav_Screen_Show_Waiting();
     return;
@@ -50,6 +53,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
       case MSG_PATH:    Nav_Screen_Set_Path(msg.path, msg.path_count); break;
       case MSG_STUB:    Nav_Screen_Set_Stubs(msg.stubs, msg.stub_count); break;
+      case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
       case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); break;
       case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); break;
@@ -83,9 +87,29 @@ void setup()
   printf("Pod ready\r\n");
 }
 
+// Redraw timing, reported with the serial "perf" command: how long frames that drew something took
+static void Perf_Measure(uint32_t us)
+{
+  static uint32_t frames = 0, total_us = 0, worst_us = 0, since_ms = 0;
+  if (us > 2000) {                         // shorter calls had nothing to redraw
+    frames++;
+    total_us += us;
+    worst_us = LV_MAX(worst_us, us);
+  }
+  if (millis() - since_ms >= 2000) {
+    if (perf_report && !screenshot_sending)
+      printf("PERF %lu frames in 2 s, avg %lu ms, worst %lu ms\r\n", (unsigned long)frames,
+             (unsigned long)(frames ? total_us / frames / 1000 : 0), (unsigned long)(worst_us / 1000));
+    frames = total_us = worst_us = 0;
+    since_ms = millis();
+  }
+}
+
 void loop()
 {
+  uint32_t start = micros();
   Lvgl_Loop();
+  Perf_Measure(micros() - start);
   Screenshot_Poll();
   delay(5);
 }

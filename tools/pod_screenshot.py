@@ -45,7 +45,7 @@ def send_commands(port: str, lines: list[str]) -> None:
         for line in lines:
             ser.write((line + "\n").encode())
             ser.flush()
-            time.sleep(0.05)
+            time.sleep(0.02)
         time.sleep(0.5)   # let the pod draw the new screen before it is captured
 
 
@@ -110,10 +110,14 @@ def main():
     parser.add_argument("output", nargs="?", help="PNG path (default: tools/screenshots/pod-<time>.png)")
     parser.add_argument("--port", default=DEFAULT_PORT)
     parser.add_argument("--msg", action="append", default=[], help="line to show as if sent by the phone")
+    parser.add_argument("--msg-file", help="file with one phone line per line (e.g. a whole map area)")
     parser.add_argument("--test-off", action="store_true", help="go back to listening to the phone")
     args = parser.parse_args()
 
-    commands = [f"msg {m}" for m in args.msg] + (["test off"] if args.test_off else [])
+    lines = list(args.msg)
+    if args.msg_file:
+        lines += [l.strip() for l in Path(args.msg_file).read_text().splitlines() if l.strip() and not l.startswith("#")]
+    commands = [f"msg {m}" for m in lines] + (["test off"] if args.test_off else [])
     if commands:
         send_commands(args.port, commands)
 

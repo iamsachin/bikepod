@@ -10,6 +10,7 @@
 #include <BLEServer.h>
 #include <BLE2901.h>
 #include "Screenshot.h"
+#include "Map_Layer.h"
 
 // Log lines would cut into screenshot data on the same serial port
 #define LOG(...) do { if (!screenshot_sending) printf(__VA_ARGS__); } while (0)
@@ -89,10 +90,59 @@ static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[4])
   return count;
 }
 
+// Map lines come in bursts of ~100, too many for the message queue: they go straight into
+// the map's own buffer. Returns true if the line was a map line.
+static bool Handle_Map_Line(const String &text)
+{
+  if (text.startsWith("MAP|")) {
+    static int16_t pts[NAV_PATH_MAX_POINTS * 2][2];
+    uint16_t id = Field(text, 1).toInt();
+    uint8_t road_class = Field(text, 2).toInt();
+    String list = Rest(text, 3);
+    uint8_t count = 0;
+    int pos = 0;
+    while (pos < (int)list.length() && count < NAV_PATH_MAX_POINTS * 2) {
+      int semi = list.indexOf(';', pos);
+      if (semi < 0) semi = list.length();
+      int comma = list.indexOf(',', pos);
+      if (comma > pos && comma < semi) {
+        pts[count][0] = list.substring(pos, comma).toInt();
+        pts[count][1] = list.substring(comma + 1, semi).toInt();
+        count++;
+      }
+      pos = semi + 1;
+    }
+    Map_Data_Add_Road(id, road_class, pts, count);
+    return true;
+  }
+  if (text.startsWith("MAPBEGIN|")) {
+    Map_Data_Begin(Field(text, 1).toInt());
+    return true;
+  }
+  if (text.startsWith("MAPEND|")) {
+    LOG("BLE: %s\r\n", text.c_str());
+    Map_Data_End(Field(text, 1).toInt(), Field(text, 2).toInt());
+    return true;
+  }
+  return false;
+}
+
 static bool Parse_Message(const String &text, Nav_Message *msg)
 {
   String kind = Field(text, 0);
   memset(msg, 0, sizeof(*msg));
+
+  if (kind == "POSE") {
+    msg->kind = MSG_POSE;
+    msg->area_id = Field(text, 1).toInt();
+    String p = Rest(text, 2);
+    int c1 = p.indexOf(','), c2 = p.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) return false;
+    msg->pose[0] = p.substring(0, c1).toInt();
+    msg->pose[1] = p.substring(c1 + 1, c2).toInt();
+    msg->pose[2] = p.substring(c2 + 1).toInt();
+    return true;
+  }
 
   if (kind == "TRIP") {
     msg->kind = MSG_TRIP;
@@ -144,12 +194,13 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
 
 static void Handle_Line(const String &text)
 {
+  if (Handle_Map_Line(text)) return;
   Nav_Message msg;
   if (!Parse_Message(text, &msg)) {
     LOG("BLE: ignored \"%s\"\r\n", text.c_str());
     return;
   }
-  if (msg.kind != MSG_PATH && msg.kind != MSG_STUB) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
+  if (msg.kind != MSG_PATH && msg.kind != MSG_STUB && msg.kind != MSG_POSE) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
   portENTER_CRITICAL(&msg_lock);
   if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
     queue_head = (queue_head + 1) % QUEUE_SIZE;

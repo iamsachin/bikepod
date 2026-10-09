@@ -11,3 +11,6 @@ void Screenshot_Poll(void);
 
 // True while a screenshot is being sent: other code should not print to the serial port then
 extern volatile bool screenshot_sending;
+
+// "perf" toggles a report of screen redraw times every 2 s
+extern bool perf_report;
