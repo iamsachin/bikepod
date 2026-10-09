@@ -172,7 +172,17 @@ static void Fake_Data_Tick(lv_timer_t *timer)
   }
 }
 
+static lv_timer_t *fake_timer = NULL;
+
 void Nav_Fake_Data_Start(void)
 {
-  lv_timer_create(Fake_Data_Tick, FAKE_TICK_MS, NULL);
+  if (!fake_timer) fake_timer = lv_timer_create(Fake_Data_Tick, FAKE_TICK_MS, NULL);
+}
+
+void Nav_Fake_Data_Stop(void)
+{
+  if (fake_timer) {
+    lv_timer_del(fake_timer);
+    fake_timer = NULL;
+  }
 }
