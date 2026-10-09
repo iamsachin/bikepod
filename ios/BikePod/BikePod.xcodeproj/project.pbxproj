@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8CBCE9D6044DF1591B825BE0 /* FerrostarCore */; };
+		9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BF76FF181C22E9399ED1D6 /* Navigator.swift */; };
 		B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93925A49563DA8E4074636DC /* BikePodApp.swift */; };
 		B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 221E8EB08715D6EDAC24B568 /* PodLink.swift */; };
 		D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98D798DFA7D8BBE18163179F /* ContentView.swift */; };
@@ -16,9 +18,21 @@
 		221E8EB08715D6EDAC24B568 /* PodLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodLink.swift; sourceTree = "<group>"; };
 		3314AE08E78E36AB0935AEF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BikePod.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		89BF76FF181C22E9399ED1D6 /* Navigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigator.swift; sourceTree = "<group>"; };
 		93925A49563DA8E4074636DC /* BikePodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikePodApp.swift; sourceTree = "<group>"; };
 		98D798DFA7D8BBE18163179F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A7FA4BD1270100D0162FAA7C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		65B9604A02D2F70EA1F1DE32 /* Sources */ = {
@@ -26,6 +40,7 @@
 			children = (
 				93925A49563DA8E4074636DC /* BikePodApp.swift */,
 				98D798DFA7D8BBE18163179F /* ContentView.swift */,
+				89BF76FF181C22E9399ED1D6 /* Navigator.swift */,
 				221E8EB08715D6EDAC24B568 /* PodLink.swift */,
 			);
 			path = Sources;
@@ -64,6 +79,7 @@
 			buildConfigurationList = 532F9545ED4A232550F427D4 /* Build configuration list for PBXNativeTarget "BikePod" */;
 			buildPhases = (
 				65FCC14B0E92CE09D98A2E53 /* Sources */,
+				A7FA4BD1270100D0162FAA7C /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -71,6 +87,7 @@
 			);
 			name = BikePod;
 			packageProductDependencies = (
+				8CBCE9D6044DF1591B825BE0 /* FerrostarCore */,
 			);
 			productName = BikePod;
 			productReference = 4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */;
@@ -100,6 +117,9 @@
 			);
 			mainGroup = D3B84F00436A1233E4DDC7A2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9DA716007D1249C4EA3192DD /* Products */;
 			projectDirPath = "";
@@ -117,6 +137,7 @@
 			files = (
 				B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */,
 				D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */,
+				9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */,
 				B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -307,6 +328,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stadiamaps/ferrostar";
+			requirement = {
+				kind = exactVersion;
+				version = 0.57.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8CBCE9D6044DF1591B825BE0 /* FerrostarCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5D1FFBCB364EF9542EAEA448 /* XCRemoteSwiftPackageReference "ferrostar" */;
+			productName = FerrostarCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 429193975E1C9F8363963C6F /* Project object */;
 }

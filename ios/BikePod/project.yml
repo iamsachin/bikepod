@@ -5,6 +5,11 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
+packages:
+  Ferrostar:
+    url: https://github.com/stadiamaps/ferrostar
+    exactVersion: 0.57.0
+
 targets:
   BikePod:
     type: application
@@ -12,6 +17,9 @@ targets:
     sources:
       - Sources
       - Resources
+    dependencies:
+      - package: Ferrostar
+        product: FerrostarCore
     info:
       path: Resources/Info.plist
       properties:
@@ -19,7 +27,8 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: BikePod uses Bluetooth to send turn directions to your handlebar display.
-        UIBackgroundModes: [bluetooth-central]
+        NSLocationWhenInUseUsageDescription: BikePod uses your location to guide you along the route.
+        UIBackgroundModes: [bluetooth-central, location]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sachinrajput.bikepod

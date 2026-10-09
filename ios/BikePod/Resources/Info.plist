@@ -22,9 +22,12 @@
 	<string>1</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>BikePod uses Bluetooth to send turn directions to your handlebar display.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BikePod uses your location to guide you along the route.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

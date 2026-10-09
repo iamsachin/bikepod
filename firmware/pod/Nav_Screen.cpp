@@ -20,6 +20,7 @@ LV_FONT_DECLARE(font_road_30);    // Inter Medium, ASCII
 #define RING_WIDTH      14
 #define ARROW_BOX       150
 #define ARROW_WIDTH     22
+#define ROAD_LINE_SPACE (-4)
 
 static lv_obj_t *ring;
 static lv_obj_t *arrow_stem;
@@ -83,7 +84,7 @@ void Nav_Screen_Create(void)
   lv_obj_set_flex_flow(dist_row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(dist_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
   lv_obj_set_style_pad_column(dist_row, 8, 0);
-  lv_obj_align(dist_row, LV_ALIGN_CENTER, 0, 52);
+  lv_obj_align(dist_row, LV_ALIGN_CENTER, 0, 36);
 
   dist_label = lv_label_create(dist_row);
   lv_obj_set_style_text_font(dist_label, &font_dist_132, 0);
@@ -95,15 +96,53 @@ void Nav_Screen_Create(void)
   lv_obj_set_style_pad_bottom(unit_label, font_dist_132.base_line - font_unit_44.base_line, 0);
 
   // Road name, lower part of the circle
+  // Up to two lines; "..." only if it still doesn't fit. Width is what the circle allows at line 2.
   road_label = lv_label_create(scr);
-  lv_obj_set_width(road_label, 300);
+  lv_obj_set_size(road_label, 290, 2 * font_road_30.line_height + ROAD_LINE_SPACE);
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(road_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_font(road_label, &font_road_30, 0);
+  lv_obj_set_style_text_line_space(road_label, ROAD_LINE_SPACE, 0);
   lv_obj_set_style_text_color(road_label, COLOR_ROAD, 0);
-  lv_obj_align(road_label, LV_ALIGN_CENTER, 0, 150);
+  lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 343);
 
   Nav_Screen_Update(TURN_RIGHT, 0, 0, "");
+}
+
+static void Ring_Anim_Cb(void *obj, int32_t value)
+{
+  lv_arc_set_value((lv_obj_t *)obj, value);
+}
+
+// Updates arrive about once per GPS fix, so glide the ring to the new value over roughly
+// the time since the previous update; it then keeps moving until the next one arrives.
+static void Ring_Animate_To(uint16_t target)
+{
+  static uint16_t anim_target = 0;
+  static uint32_t last_update_ms = 0;
+
+  uint32_t gap_ms = lv_tick_elaps(last_update_ms);
+  last_update_ms = lv_tick_get();
+  if (target == anim_target) return;
+
+  lv_anim_del(ring, Ring_Anim_Cb);
+  int32_t shown = lv_arc_get_value(ring);
+  anim_target = target;
+
+  // A new turn (ring goes back to empty) or a long pause: jump instead of sweeping
+  if (target < shown || gap_ms > 3000) {
+    lv_arc_set_value(ring, target);
+    return;
+  }
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, ring);
+  lv_anim_set_exec_cb(&a, Ring_Anim_Cb);
+  lv_anim_set_values(&a, shown, target);
+  lv_anim_set_time(&a, LV_CLAMP(100, gap_ms, 1500));
+  lv_anim_set_path_cb(&a, lv_anim_path_linear);
+  lv_anim_start(&a);
 }
 
 void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, const char *road)
@@ -135,7 +174,7 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
   }
   lv_label_set_text(dist_label, num);
 
-  lv_arc_set_value(ring, progress);
+  Ring_Animate_To(progress);
   lv_label_set_text(road_label, road);
 }
 
