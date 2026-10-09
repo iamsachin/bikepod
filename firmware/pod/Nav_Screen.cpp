@@ -672,6 +672,11 @@ void Nav_Screen_Create(void)
   lv_label_set_long_mode(info_sub, LV_LABEL_LONG_DOT);
   info_detail = Label_Create(info_group, &font_text_32, COLOR_SOFT);
 
+  // The map band's edge fade would otherwise paint over the ring where they overlap
+  lv_obj_move_foreground(ring);
+  lv_obj_move_foreground(ring_tip);
+  lv_obj_move_foreground(spinner);
+
   Nav_Screen_Show_Waiting();
 }
 
@@ -767,6 +772,9 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
       speed_mps = speed_mps == 0 ? measured : speed_mps * 0.6f + measured * 0.4f;
     }
   }
+  // Distance not changing (stopped at a light, or the phone repeating its last line): not moving.
+  // Without this the glide would keep sliding the map on an old speed.
+  if (distance_m == turn_distance_m && lv_tick_elaps(dist_time_ms) > 1500) speed_mps = 0;
   if (distance_m != turn_distance_m) dist_time_ms = lv_tick_get();
   turn_distance_m = distance_m;
 

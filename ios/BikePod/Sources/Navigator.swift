@@ -266,7 +266,7 @@ final class Navigator {
     /// A whole map area: ~100-250 lines, sent once per area (and again after a reconnect)
     private func sendMapArea(_ lines: [String]) {
         guard !podFeedPaused, link.state == .connected else { return }
-        for line in lines { link.send(line: line) }
+        for line in lines { link.send(line: line, priority: .bulk) }
         mapSentForConnection = link.connectionID
     }
 
@@ -283,7 +283,7 @@ final class Navigator {
             let throttled = kind == "path" || kind == "stub" || kind == "pose"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
-            link.send(line: line)
+            link.send(line: line, kind: kind)
         }
     }
 

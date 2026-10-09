@@ -48,15 +48,57 @@ final class PodLink: NSObject {
         send(line: "\(dir.rawValue)|\(max(0, metres))|\(road)")
     }
 
-    /// Writes one message line (see BLE_Link.h on the pod for the formats).
-    func send(line: String) {
+    /// How urgent a line is. Live lines (turn, pose, route...) always go before bulk ones (map areas),
+    /// so a map download never delays what the rider sees.
+    enum Priority { case live, bulk }
+
+    private var liveQueue: [(kind: String, line: String)] = []   // newest line per kind only
+    private var bulkQueue: [String] = []
+
+    /// Queues one message line (see BLE_Link.h on the pod for the formats).
+    /// - Parameter kind: live lines of the same kind replace each other while waiting, so a
+    ///   backlog never sends stale positions.
+    func send(line: String, kind: String? = nil, priority: Priority = .live) {
+        guard pod != nil, navChar != nil else { return }
+        switch priority {
+        case .live:
+            if let kind, let i = liveQueue.firstIndex(where: { $0.kind == kind }) {
+                liveQueue[i].line = line
+            } else {
+                liveQueue.append((kind ?? UUID().uuidString, line))
+            }
+        case .bulk:
+            bulkQueue.append(line)
+        }
+        pump()
+    }
+
+    /// Writes "without response": Bluetooth's link layer already guarantees delivery, and not
+    /// waiting for a reply per line lets many lines go in each radio exchange (a map area of
+    /// ~250 lines took ~7 s with replies). iOS says when it has room for more.
+    private func pump() {
         guard let pod, let navChar else { return }
-        var text = line
-        // The pod asks for a large MTU, so a whole PATH line fits; never exceed what iOS allows
-        let limit = min(pod.maximumWriteValueLength(for: .withResponse), 240)
-        while text.utf8.count > limit { text.removeLast() }
-        pod.writeValue(Data(text.utf8), for: navChar, type: .withResponse)
-        lastSent = text
+        while pod.canSendWriteWithoutResponse {
+            let line: String
+            if !liveQueue.isEmpty {
+                line = liveQueue.removeFirst().line
+            } else if !bulkQueue.isEmpty {
+                line = bulkQueue.removeFirst()
+            } else {
+                return
+            }
+            var data = Data(line.utf8)
+            if data.count > 400 { data = data.prefix(400) }
+            // A line longer than one packet needs the slower acknowledged "long write"
+            let fits = data.count <= pod.maximumWriteValueLength(for: .withoutResponse)
+            pod.writeValue(data, for: navChar, type: fits ? .withoutResponse : .withResponse)
+            lastSent = line
+        }
+    }
+
+    private func clearQueues() {
+        liveQueue.removeAll()
+        bulkQueue.removeAll()
     }
 
     private func startScan() {
@@ -94,11 +136,16 @@ extension PodLink: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         navChar = nil
         pod = nil
+        clearQueues()
         startScan()   // the pod restarts advertising, so just look for it again
     }
 }
 
 extension PodLink: CBPeripheralDelegate {
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        pump()
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else { return }
         peripheral.discoverCharacteristics([Self.navCharUUID], for: service)
