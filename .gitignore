@@ -8,3 +8,7 @@ build/
 # Xcode per-user state
 xcuserdata/
 *.xcresult
+
+# Python environment and captured screenshots for tools/
+tools/.venv/
+tools/screenshots/

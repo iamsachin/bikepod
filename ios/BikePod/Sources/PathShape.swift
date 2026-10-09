@@ -8,12 +8,17 @@ import Foundation
 /// The route itself sets the heading (not the GPS course), so it stays steady at low speed.
 enum PathShape {
     static let behindMetres = 30.0
-    static let beyondTurnMetres = 50.0
+    static let beyondTurnMetres = 80.0
     static let maxAheadMetres = 700.0
     static let maxPoints = 20          // keeps one PATH line within a single BLE packet
 
+    /// - Parameter previousAlong: where the rider was along the route last time (metres from the
+    ///   start). Routes can double back on themselves (U-turns on divided roads), so the nearest
+    ///   piece of route may be the other carriageway; searching only near the last position avoids that.
+    /// - Returns: the shape, and the rider's position along the route to pass in next time.
     static func around(rider: GeographicCoordinate, route: [GeographicCoordinate],
-                       metresToTurn: Double) -> [(x: Int, y: Int)]? {
+                       metresToTurn: Double, previousAlong: Double? = nil)
+        -> (shape: [(x: Int, y: Int)], along: Double)? {
         guard route.count >= 2 else { return nil }
 
         // Flat local projection in metres around the rider (fine over a few hundred metres)
@@ -26,11 +31,15 @@ enum PathShape {
         var along = [0.0]
         for i in 1..<pts.count { along.append(along[i - 1] + pts[i - 1].distance(to: pts[i])) }
 
-        // Where the rider is along the route: nearest point on any segment
+        // Where the rider is along the route: nearest point on a segment (near the last position if known)
         var best = (distanceSq: Double.infinity, s: 0.0)
         for i in 0..<(pts.count - 1) {
+            if let previous = previousAlong, along[i + 1] < previous - 50 || along[i] > previous + 400 { continue }
             let (t, d2) = Point.zero.projection(onto: pts[i], pts[i + 1])
             if d2 < best.distanceSq { best = (d2, along[i] + t * pts[i].distance(to: pts[i + 1])) }
+        }
+        guard best.distanceSq.isFinite else {
+            return around(rider: rider, route: route, metresToTurn: metresToTurn)   // jumped: search everywhere
         }
         let s0 = best.s
         let total = along.last ?? 0
@@ -78,7 +87,7 @@ enum PathShape {
             if let last = result.last, last == q { continue }
             result.append(q)
         }
-        return result
+        return (result, s0)
     }
 
     /// Douglas-Peucker line simplification; keeps both end points.

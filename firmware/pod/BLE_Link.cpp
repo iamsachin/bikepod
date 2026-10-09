@@ -9,6 +9,10 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2901.h>
+#include "Screenshot.h"
+
+// Log lines would cut into screenshot data on the same serial port
+#define LOG(...) do { if (!screenshot_sending) printf(__VA_ARGS__); } while (0)
 
 #define QUEUE_SIZE 8
 
@@ -17,6 +21,7 @@ static Nav_Message queue[QUEUE_SIZE];
 static uint8_t queue_head = 0;     // next to take
 static uint8_t queue_count = 0;
 static volatile bool connected = false;
+static volatile bool testing = false;    // lines come from the Mac over serial, not the phone
 
 // Returns the text between the n-th and (n+1)-th '|' (n = 0 is the first field)
 static String Field(const String &text, int n)
@@ -108,34 +113,49 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   return true;
 }
 
+static void Handle_Line(const String &text)
+{
+  Nav_Message msg;
+  if (!Parse_Message(text, &msg)) {
+    LOG("BLE: ignored \"%s\"\r\n", text.c_str());
+    return;
+  }
+  if (msg.kind != MSG_PATH) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
+  portENTER_CRITICAL(&msg_lock);
+  if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
+    queue_head = (queue_head + 1) % QUEUE_SIZE;
+    queue_count--;
+  }
+  queue[(queue_head + queue_count) % QUEUE_SIZE] = msg;
+  queue_count++;
+  portEXIT_CRITICAL(&msg_lock);
+}
+
 class Nav_Write_Callbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *characteristic) override {
-    String text = characteristic->getValue();
-    Nav_Message msg;
-    if (!Parse_Message(text, &msg)) {
-      printf("BLE: ignored \"%s\"\r\n", text.c_str());
-      return;
-    }
-    if (msg.kind != MSG_PATH) printf("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
-    portENTER_CRITICAL(&msg_lock);
-    if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
-      queue_head = (queue_head + 1) % QUEUE_SIZE;
-      queue_count--;
-    }
-    queue[(queue_head + queue_count) % QUEUE_SIZE] = msg;
-    queue_count++;
-    portEXIT_CRITICAL(&msg_lock);
+    if (!testing) Handle_Line(characteristic->getValue());
   }
 };
+
+void BLE_Link_Inject(const String &line)
+{
+  testing = true;
+  Handle_Line(line);
+}
+
+void BLE_Link_End_Test(void)
+{
+  testing = false;
+}
 
 class Server_Callbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *server) override {
     connected = true;
-    printf("BLE: phone connected\r\n");
+    LOG("BLE: phone connected\r\n");
   }
   void onDisconnect(BLEServer *server) override {
     connected = false;
-    printf("BLE: phone disconnected, advertising again\r\n");
+    LOG("BLE: phone disconnected, advertising again\r\n");
     BLEDevice::startAdvertising();
   }
 };
@@ -162,12 +182,12 @@ void BLE_Link_Init(void)
   advertising->addServiceUUID(POD_SERVICE_UUID);
   advertising->setScanResponse(true);
   BLEDevice::startAdvertising();
-  printf("BLE: advertising as \"%s\"\r\n", POD_BLE_NAME);
+  LOG("BLE: advertising as \"%s\"\r\n", POD_BLE_NAME);
 }
 
 bool BLE_Link_Connected(void)
 {
-  return connected;
+  return connected || testing;
 }
 
 bool BLE_Link_Take_Message(Nav_Message *msg)

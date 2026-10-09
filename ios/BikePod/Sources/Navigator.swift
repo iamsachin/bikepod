@@ -49,6 +49,8 @@ final class Navigator {
     @ObservationIgnored private var turnLine = ""          // latest "R|400|MG Rd" while navigating
     @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
     @ObservationIgnored private var pathLine = ""          // latest "PATH|..." route drawing
+    @ObservationIgnored private var pathAlong: Double?     // rider's last position along the route, metres
+    @ObservationIgnored private var pathRouteCount = 0     // detects a new route (reroute) to reset pathAlong
     @ObservationIgnored private var tripStartedAt = Date()
     @ObservationIgnored private var tripKm = 0.0
     @ObservationIgnored private var podFeed: Task<Void, Never>?
@@ -146,6 +148,7 @@ final class Navigator {
             turnLine = ""
             tripLine = ""
             pathLine = ""
+            pathAlong = nil
             phase = .navigating
         } catch {
             phase = .failed("Could not start navigation: \(error.localizedDescription)")
@@ -197,10 +200,15 @@ final class Navigator {
         let eta = Date().addingTimeInterval(progress.durationRemaining)
         tripLine = String(format: "TRIP|%@|%.1f", Self.clockFormat.string(from: eta), remainingKm)
 
+        if state.routeGeometry.count != pathRouteCount {   // new route: forget the old position
+            pathRouteCount = state.routeGeometry.count
+            pathAlong = nil
+        }
         if let rider = state.preferredUserLocation?.coordinates,
-           let shape = PathShape.around(rider: rider, route: state.routeGeometry,
-                                        metresToTurn: progress.distanceToNextManeuver) {
-            pathLine = "PATH|" + shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
+           let result = PathShape.around(rider: rider, route: state.routeGeometry,
+                                         metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong) {
+            pathAlong = result.along
+            pathLine = "PATH|" + result.shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
         }
         updatePod()
     }
@@ -269,7 +277,8 @@ final class Navigator {
         for (long, abbr) in abbreviations {
             short = short.replacingOccurrences(of: "\\b\(long)\\b", with: abbr, options: .regularExpression)
         }
-        return short.trimmingCharacters(in: .whitespaces)
+        // Unnamed roads come through as an instruction ("Turn left."): drop the full stop
+        return short.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ".")))
     }
 
     /// The pod's fonts only contain plain ASCII characters

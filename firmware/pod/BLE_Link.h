@@ -39,6 +39,10 @@ struct Nav_Message {
 };
 
 void BLE_Link_Init(void);
-bool BLE_Link_Connected(void);
+bool BLE_Link_Connected(void);   // also true while test lines are being injected
+// For testing from the Mac (serial "msg <line>"): handle a line as if the phone had sent it.
+// While test lines are being injected, lines from the phone are ignored (until "test off").
+void BLE_Link_Inject(const String &line);
+void BLE_Link_End_Test(void);
 // Takes the oldest waiting message; returns false when there is none
 bool BLE_Link_Take_Message(Nav_Message *msg);

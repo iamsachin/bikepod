@@ -9,6 +9,7 @@
 #include "LVGL_Driver.h"
 #include "Nav_Screen.h"
 #include "BLE_Link.h"
+#include "Screenshot.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -63,7 +64,7 @@ static void Pod_Tick(lv_timer_t *timer)
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(921600);             // fast enough for screenshots (tools/pod_screenshot.py)
   printf("Pod starting\r\n");
 
   I2C_Init();
@@ -84,5 +85,6 @@ void setup()
 void loop()
 {
   Lvgl_Loop();
+  Screenshot_Poll();
   delay(5);
 }
