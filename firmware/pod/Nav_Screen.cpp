@@ -43,7 +43,7 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define PATH_H          196
 #define MARKER_X        (PATH_W / 2)
 #define MARKER_Y        138
-#define PATH_LINE       14
+#define PATH_LINE       10
 #define PATH_MAX_POINTS 24
 #define MAX_STUBS       16
 #define STUB_METRES     22        // drawn length of a side street, in metres at the current zoom...
@@ -431,7 +431,7 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
     return;
   }
   dx /= len; dy /= len;
-  const float wing = 16, c = cosf(0.75f), s = sinf(0.75f);  // wings ~43 degrees either side
+  const float wing = 13, c = cosf(0.75f), s = sinf(0.75f);  // wings ~43 degrees either side
   head_pts[0].x = (lv_coord_t)lroundf(end.x - wing * (dx * c - dy * s));
   head_pts[0].y = (lv_coord_t)lroundf(end.y - wing * (dx * s + dy * c));
   head_pts[1] = end;
