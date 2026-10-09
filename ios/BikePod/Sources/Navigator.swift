@@ -49,6 +49,9 @@ final class Navigator {
     @ObservationIgnored private var turnLine = ""          // latest "R|400|MG Rd" while navigating
     @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
     @ObservationIgnored private var pathLine = ""          // latest "PATH|..." route drawing
+    @ObservationIgnored private var stubLine = ""          // latest "STUB|..." side streets
+    /// Sees Valhalla's raw answers on their way into Ferrostar, to keep the junction details
+    private let junctionCapture = JunctionCapture()
     @ObservationIgnored private var pathAlong: Double?     // rider's last position along the route, metres
     @ObservationIgnored private var pathRouteCount = 0     // detects a new route (reroute) to reset pathAlong
     @ObservationIgnored private var tripStartedAt = Date()
@@ -83,11 +86,12 @@ final class Navigator {
         snappedLocationCourseFiltering: .snapToRoute
     )
 
-    private static func makeCore(_ provider: LocationProviding) throws -> FerrostarCore {
+    private func makeCore(_ provider: LocationProviding) throws -> FerrostarCore {
         try FerrostarCore(
-            wellKnownRouteProvider: .valhalla(endpointUrl: valhallaURL, profile: "motorcycle"),
+            wellKnownRouteProvider: .valhalla(endpointUrl: Self.valhallaURL, profile: "motorcycle"),
             locationProvider: provider,
-            navigationControllerConfig: config
+            navigationControllerConfig: Self.config,
+            networkSession: junctionCapture
         )
     }
 
@@ -103,7 +107,7 @@ final class Navigator {
         let requestID = UUID()
         routeRequestID = requestID
         do {
-            let router = try Self.makeCore(device)
+            let router = try makeCore(device)
             let routes = try await router.getRoutes(
                 initialLocation: origin,
                 waypoints: [Waypoint(coordinate: GeographicCoordinate(lat: destination.latitude,
@@ -129,7 +133,7 @@ final class Navigator {
     func startNavigation(simulate: Bool, speedUp: UInt64) {
         guard case let .preview(route) = phase else { return }
         do {
-            let core = try Self.makeCore(simulate ? simulated : device)
+            let core = try makeCore(simulate ? simulated : device)
             if simulate {
                 simulated.warpFactor = max(1, speedUp)
                 // One simulated GPS point every 10 m, once per second (divided by the speed-up)
@@ -148,6 +152,7 @@ final class Navigator {
             turnLine = ""
             tripLine = ""
             pathLine = ""
+            stubLine = ""
             pathAlong = nil
             phase = .navigating
         } catch {
@@ -171,6 +176,7 @@ final class Navigator {
         turnLine = ""
         tripLine = ""
         pathLine = ""
+        stubLine = ""
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -204,11 +210,14 @@ final class Navigator {
             pathRouteCount = state.routeGeometry.count
             pathAlong = nil
         }
+        let junctions = core?.route.map { junctionCapture.junctions(forRouteDistance: $0.distance) } ?? []
         if let rider = state.preferredUserLocation?.coordinates,
            let result = PathShape.around(rider: rider, route: state.routeGeometry,
-                                         metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong) {
+                                         metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
+                                         junctions: junctions) {
             pathAlong = result.along
             pathLine = "PATH|" + result.shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
+            stubLine = "STUB|" + result.stubs.map { "\($0.x),\($0.y),\($0.angle)" }.joined(separator: ";")
         }
         updatePod()
     }
@@ -226,7 +235,8 @@ final class Navigator {
             if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
             // Turn first: the pod sizes the route drawing from the turn distance
-            return [("turn", turnLine), ("path", pathLine), ("trip", tripLine)].filter { !$0.line.isEmpty }
+            return [("turn", turnLine), ("path", pathLine), ("stub", stubLine), ("trip", tripLine)]
+                .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
             let place = Self.podText(destinationName)
@@ -248,7 +258,8 @@ final class Navigator {
             let last = lastPodSent[kind]
             let age = now.timeIntervalSince(last?.at ?? .distantPast)
             let changed = line != last?.line
-            guard (changed && (kind != "path" || age >= 0.25)) || age >= 2 else { continue }
+            let throttled = kind == "path" || kind == "stub"
+            guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
             link.send(line: line)
         }

@@ -9,6 +9,8 @@ void Nav_Screen_Create(void);
 void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, const char *road);
 // Route around the rider in metres, heading-up (+x right, +y ahead); the rider is the (0,0) point
 void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count);
+// Side streets: junction x,y in the same metres frame as the path, angle clockwise from ahead
+void Nav_Screen_Set_Stubs(const int16_t (*stubs)[3], uint8_t count);
 // Bottom line on the turn and rerouting screens: arrival time and kilometres left
 void Nav_Screen_Set_Trip(const char *eta, float km_left);
 void Nav_Screen_Show_Waiting(void);

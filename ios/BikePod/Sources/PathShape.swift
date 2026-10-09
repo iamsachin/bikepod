@@ -11,14 +11,20 @@ enum PathShape {
     static let beyondTurnMetres = 80.0
     static let maxAheadMetres = 700.0
     static let maxPoints = 20          // keeps one PATH line within a single BLE packet
+    static let maxStubs = 14           // keeps one STUB line within a single BLE packet
+
+    /// A side street to draw: where it leaves the route (metres, same frame as the shape)
+    /// and its direction in degrees clockwise from straight ahead.
+    typealias Stub = (x: Int, y: Int, angle: Int)
 
     /// - Parameter previousAlong: where the rider was along the route last time (metres from the
     ///   start). Routes can double back on themselves (U-turns on divided roads), so the nearest
     ///   piece of route may be the other carriageway; searching only near the last position avoids that.
-    /// - Returns: the shape, and the rider's position along the route to pass in next time.
+    /// - Parameter junctions: Valhalla's junctions for this route (see JunctionCapture), for side streets.
+    /// - Returns: the shape, side-street stubs, and the rider's position along the route to pass in next time.
     static func around(rider: GeographicCoordinate, route: [GeographicCoordinate],
-                       metresToTurn: Double, previousAlong: Double? = nil)
-        -> (shape: [(x: Int, y: Int)], along: Double)? {
+                       metresToTurn: Double, previousAlong: Double? = nil, junctions: [Junction] = [])
+        -> (shape: [(x: Int, y: Int)], stubs: [Stub], along: Double)? {
         guard route.count >= 2 else { return nil }
 
         // Flat local projection in metres around the rider (fine over a few hundred metres)
@@ -39,7 +45,8 @@ enum PathShape {
             if d2 < best.distanceSq { best = (d2, along[i] + t * pts[i].distance(to: pts[i + 1])) }
         }
         guard best.distanceSq.isFinite else {
-            return around(rider: rider, route: route, metresToTurn: metresToTurn)   // jumped: search everywhere
+            // Jumped (e.g. after a long GPS gap): search the whole route
+            return around(rider: rider, route: route, metresToTurn: metresToTurn, junctions: junctions)
         }
         let s0 = best.s
         let total = along.last ?? 0
@@ -87,7 +94,21 @@ enum PathShape {
             if let last = result.last, last == q { continue }
             result.append(q)
         }
-        return (result, s0)
+        // Side streets at the junctions in view, nearest first
+        let headingDegrees = heading * 180 / .pi
+        var stubs: [(distance: Double, stub: Stub)] = []
+        for junction in junctions where junction.geometryIndex < pts.count {
+            let s = along[junction.geometryIndex]
+            guard s >= start, s <= end else { continue }
+            let p = local(pts[junction.geometryIndex])
+            for bearing in junction.sideBearings {
+                let angle = (bearing - headingDegrees).truncatingRemainder(dividingBy: 360)
+                stubs.append((abs(s - s0), (Int(p.x.rounded()), Int(p.y.rounded()),
+                                            Int((angle < 0 ? angle + 360 : angle).rounded()) % 360)))
+            }
+        }
+        stubs.sort { $0.distance < $1.distance }
+        return (result, stubs.prefix(maxStubs).map(\.stub), s0)
     }
 
     /// Douglas-Peucker line simplification; keeps both end points.

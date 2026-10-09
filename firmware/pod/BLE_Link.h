@@ -8,6 +8,8 @@
 //   TRIP|18:42|6.0            arrival time and kilometres left
 //   PATH|-2,-30;0,0;3,85;...  route around the rider in metres, heading-up (+x right, +y ahead),
 //                             the rider is the 0,0 point
+//   STUB|40,85,270;...        side streets: junction x,y (metres, same frame as PATH) and the
+//                             street's direction in degrees clockwise from straight ahead
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -17,8 +19,9 @@
 #define POD_NAV_CHAR_UUID     "50632787-1b5b-4788-a4ee-8ff5dc145962"
 
 #define NAV_PATH_MAX_POINTS   24
+#define NAV_MAX_STUBS         16
 
-enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
+enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
 
 struct Nav_Message {
   Msg_Kind kind;
@@ -36,6 +39,9 @@ struct Nav_Message {
   // MSG_PATH
   uint8_t path_count;
   int16_t path[NAV_PATH_MAX_POINTS][2];
+  // MSG_STUB
+  uint8_t stub_count;
+  int16_t stubs[NAV_MAX_STUBS][3];
 };
 
 void BLE_Link_Init(void);

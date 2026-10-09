@@ -49,6 +49,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TURN:    Show_Turn(msg); break;
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
       case MSG_PATH:    Nav_Screen_Set_Path(msg.path, msg.path_count); break;
+      case MSG_STUB:    Nav_Screen_Set_Stubs(msg.stubs, msg.stub_count); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
       case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); break;
       case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); break;

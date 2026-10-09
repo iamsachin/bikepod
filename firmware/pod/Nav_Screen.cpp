@@ -19,6 +19,7 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define COLOR_SOFT      lv_color_hex(0xE6E6E6)   // ETA line
 #define COLOR_PATH      lv_color_hex(0xD6D6D6)   // route ahead
 #define COLOR_PATH_DONE lv_color_hex(0x262626)   // route already ridden
+#define COLOR_STUB      lv_color_hex(0x3C3C3C)   // side streets
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)   // road name, units
 #define COLOR_AMBER     lv_color_hex(0xF5B83D)
 #define COLOR_RED       lv_color_hex(0xE5484D)
@@ -37,11 +38,14 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define PATH_X          40
 #define PATH_Y          212
 #define PATH_W          400
-#define PATH_H          162
+#define PATH_H          170
 #define MARKER_X        (PATH_W / 2)
-#define MARKER_Y        108
+#define MARKER_Y        122
 #define PATH_LINE       14
 #define PATH_MAX_POINTS 24
+#define MAX_STUBS       16
+#define STUB_LENGTH     34        // pixels, whatever the zoom: just enough to show a street is there
+#define STUB_LINE       10
 
 static lv_obj_t *ring;
 static lv_obj_t *turn_group;      // header + road + route drawing
@@ -100,6 +104,10 @@ static void Arrows_Init(void)
 static lv_point_t behind_pts[PATH_DRAW_MAX];
 static lv_point_t ahead_pts[PATH_DRAW_MAX];
 static lv_point_t head_pts[3];
+static lv_obj_t *stub_lines[MAX_STUBS];
+static lv_point_t stub_pts[MAX_STUBS][2];
+static int16_t stub_data[MAX_STUBS][3];
+static uint8_t stub_count = 0;
 
 static lv_obj_t *Line_Create(lv_obj_t *parent, lv_coord_t width, lv_color_t color, lv_opa_t opa)
 {
@@ -252,8 +260,12 @@ static void Icons_Create(lv_obj_t *parent)
 /******************************* Route drawing *******************************/
 static float path_scale = 0;      // pixels per metre
 
+static void Draw_Stubs(void);
+
 static void Path_Clear(void)
 {
+  stub_count = 0;
+  Draw_Stubs();
   lv_obj_add_flag(path_behind, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
@@ -317,14 +329,42 @@ static uint8_t Smooth(const float (*in)[2], uint8_t n, lv_point_t *out)
   return n;
 }
 
+// Side streets as short dim lines from each junction, drawn under the route. They follow the
+// route drawing's zoom for position but keep a fixed length on screen.
+static void Draw_Stubs(void)
+{
+  for (uint8_t i = 0; i < MAX_STUBS; i++) {
+    if (i >= stub_count || path_scale == 0) {
+      lv_obj_add_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    float x = MARKER_X + stub_data[i][0] * path_scale;
+    float y = MARKER_Y - stub_data[i][1] * path_scale;
+    float a = stub_data[i][2] * (float)M_PI / 180;      // 0 = up the screen, clockwise
+    stub_pts[i][0] = { (lv_coord_t)lroundf(x), (lv_coord_t)lroundf(y) };
+    stub_pts[i][1] = { (lv_coord_t)lroundf(x + STUB_LENGTH * sinf(a)), (lv_coord_t)lroundf(y - STUB_LENGTH * cosf(a)) };
+    lv_line_set_points(stub_lines[i], stub_pts[i], 2);
+    lv_obj_clear_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void Nav_Screen_Set_Stubs(const int16_t (*stubs)[3], uint8_t count)
+{
+  stub_count = count > MAX_STUBS ? MAX_STUBS : count;
+  memcpy(stub_data, stubs, stub_count * sizeof(stub_data[0]));
+  Draw_Stubs();
+}
+
 void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
 {
   if (count > PATH_MAX_POINTS) count = PATH_MAX_POINTS;
 
-  // Zoom so the turn sits about 100 px ahead of the rider; ease zoom changes between updates
-  float target = 100.0f / LV_MAX((float)turn_distance_m, 35.0f);
+  // Zoom so the turn sits about 78 px ahead of the rider (room above for the exit and its side
+  // streets); ease zoom changes between updates
+  float target = 78.0f / LV_MAX((float)turn_distance_m, 30.0f);
   target = LV_CLAMP(0.3f, target, 2.6f);
   path_scale = path_scale == 0 ? target : path_scale * 0.6f + target * 0.4f;
+  Draw_Stubs();
 
   // The rider's position is the (0,0) point: before it is ridden, after it is ahead
   uint8_t split = 0;
@@ -503,6 +543,10 @@ void Nav_Screen_Create(void)
   // Route drawing, clipped to its own area so it never runs into the text
   lv_obj_t *path_area = Plain_Box(turn_group, PATH_W, PATH_H);
   lv_obj_set_pos(path_area, PATH_X, PATH_Y);
+  for (uint8_t i = 0; i < MAX_STUBS; i++) {             // created first, so they sit under the route
+    stub_lines[i] = Line_Create(path_area, STUB_LINE, COLOR_STUB, LV_OPA_COVER);
+    lv_obj_add_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
+  }
   // Solid colours: see-through segments overlap at every joint and look blotchy
   path_behind = Line_Create(path_area, PATH_LINE - 2, COLOR_PATH_DONE, LV_OPA_COVER);
   path_ahead = Line_Create(path_area, PATH_LINE, COLOR_PATH, LV_OPA_COVER);
@@ -606,7 +650,9 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
   if (mode != MODE_TURN) {
     Set_Mode(MODE_TURN);
     Ring_Set_Fixed(0);   // a fresh approach after another screen
+    path_scale = 0;
   }
+  if (distance_m > turn_distance_m + 30) path_scale = 0;   // a new turn: snap the zoom, don't ease
   turn_distance_m = distance_m;
 
   switch (dir) {

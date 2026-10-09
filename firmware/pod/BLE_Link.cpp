@@ -65,6 +65,27 @@ static uint8_t Parse_Path(const String &list, int16_t (*pts)[2])
   return count;
 }
 
+// "x,y,a;x,y,a;..." -> stubs
+static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[3])
+{
+  uint8_t count = 0;
+  int pos = 0;
+  while (pos < (int)list.length() && count < NAV_MAX_STUBS) {
+    int semi = list.indexOf(';', pos);
+    if (semi < 0) semi = list.length();
+    int c1 = list.indexOf(',', pos);
+    int c2 = c1 < 0 ? -1 : list.indexOf(',', c1 + 1);
+    if (c1 > pos && c2 > c1 && c2 < semi) {
+      stubs[count][0] = list.substring(pos, c1).toInt();
+      stubs[count][1] = list.substring(c1 + 1, c2).toInt();
+      stubs[count][2] = list.substring(c2 + 1, semi).toInt();
+      count++;
+    }
+    pos = semi + 1;
+  }
+  return count;
+}
+
 static bool Parse_Message(const String &text, Nav_Message *msg)
 {
   String kind = Field(text, 0);
@@ -79,6 +100,11 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   if (kind == "PATH") {
     msg->kind = MSG_PATH;
     msg->path_count = Parse_Path(Rest(text, 1), msg->path);
+    return true;
+  }
+  if (kind == "STUB") {
+    msg->kind = MSG_STUB;
+    msg->stub_count = Parse_Stubs(Rest(text, 1), msg->stubs);
     return true;
   }
   if (kind == "REROUTE") {
@@ -120,7 +146,7 @@ static void Handle_Line(const String &text)
     LOG("BLE: ignored \"%s\"\r\n", text.c_str());
     return;
   }
-  if (msg.kind != MSG_PATH) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
+  if (msg.kind != MSG_PATH && msg.kind != MSG_STUB) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
   portENTER_CRITICAL(&msg_lock);
   if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
     queue_head = (queue_head + 1) % QUEUE_SIZE;
