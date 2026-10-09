@@ -68,7 +68,13 @@ static uint8_t history_head = 0;
 
 // UI
 static lv_obj_t *root;
-static lv_obj_t *gauge;
+// Top scale, split so a change only redraws a small strip: static grey dashes, a blue arc for
+// the lean, a static layer of black gaps over it (turning the arc into dashes), and small tick lines
+static lv_obj_t *dashes;
+static lv_obj_t *lit_arc;
+static lv_obj_t *gaps;
+static lv_obj_t *tick_now, *tick_max_l, *tick_max_r;
+static lv_point_t tick_pts[3][2];
 static lv_obj_t *value_label, *side_label;
 static lv_obj_t *max_l_label, *lat_label, *max_r_label;
 static lv_obj_t *graph;
@@ -101,7 +107,12 @@ static void Sample(lv_timer_t *timer)
   }
 
   w = Sub(w, gyro_bias);
-  const float dt = SAMPLE_MS / 1000.0f;
+  // Real time since the last reading: this runs in the screen's loop, which can be late while a
+  // frame is being drawn (assuming a fixed 10 ms made rotations count up to 10x too small)
+  static uint32_t last_us = 0;
+  uint32_t now_us = micros();
+  float dt = last_us ? fminf((now_us - last_us) / 1e6f, 0.05f) : SAMPLE_MS / 1000.0f;
+  last_us = now_us;
   lean += Dot(w, forward) * dt;                        // roll rate, + = leaning further right
 
   float v = lv_tick_elaps(speed_at_ms) < 3000 ? speed_mps : 0;
@@ -146,41 +157,85 @@ void Lean_Calibrate(void)
 }
 
 /*********************************** Drawing ***********************************/
-// Top scale: dashes from 60 deg left to 60 deg right over the top; blue from upright to the
-// current lean, a white tick at the lean, grey ticks at the deepest lean each side
-static void Gauge_Draw(lv_event_t *e)
+// Scale geometry: dashes of 3 degrees every 5 degrees, from 100 degrees left of 12 o'clock to
+// 100 right (60 deg of lean at each end). LVGL angles: 0 = 3 o'clock, clockwise, so 270 = top.
+#define SCALE_OUTER   220
+#define SCALE_WIDTH   10
+#define SCALE_START   (270 - GAUGE_HALF_SPAN)
+#define SCALE_END     (270 + GAUGE_HALF_SPAN)
+
+// grow: extra pixels each side (the black gaps are drawn slightly wider so they fully cut the blue)
+static void Scale_Arcs(lv_event_t *e, lv_color_t color, int from, int len, int grow)
 {
   lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+  lv_obj_t *obj = lv_event_get_target(e);
   lv_area_t box;
-  lv_obj_get_coords(gauge, &box);
+  lv_obj_get_coords(obj, &box);
   lv_point_t c = { (lv_coord_t)((box.x1 + box.x2) / 2), (lv_coord_t)((box.y1 + box.y2) / 2) };
-
   lv_draw_arc_dsc_t arc;
   lv_draw_arc_dsc_init(&arc);
-  arc.width = 10;
-  const int outer = 220;
-  float lean_arc = fmaxf(-GAUGE_HALF_SPAN, fminf(GAUGE_HALF_SPAN, lean * GAUGE_HALF_SPAN / GAUGE_MAX_DEG));
-  for (int a = 270 - GAUGE_HALF_SPAN; a < 270 + GAUGE_HALF_SPAN; a += 5) {
-    float mid = a + 1.5f - 270;                         // dash centre, relative to 12 o'clock
-    bool lit = (lean_arc > 0 && mid > 0 && mid < lean_arc) || (lean_arc < 0 && mid < 0 && mid > lean_arc);
-    arc.color = lit ? COLOR_BLUE : COLOR_DASH;
-    lv_draw_arc(ctx, &arc, &c, outer, a % 360, (a + 3) % 360);
-  }
+  arc.width = SCALE_WIDTH + 2 * grow;
+  arc.color = color;
+  for (int a = SCALE_START + from; a < SCALE_END; a += 5) lv_draw_arc(ctx, &arc, &c, SCALE_OUTER + grow, a % 360, (a + len) % 360);
+}
 
-  lv_draw_line_dsc_t line;
-  lv_draw_line_dsc_init(&line);
-  line.round_start = line.round_end = 1;
-  auto tick = [&](float rel_deg, int r1, int r2, lv_coord_t width, lv_color_t color) {
-    float t = (270 + rel_deg) * (float)M_PI / 180;
-    lv_point_t p1 = { (lv_coord_t)lroundf(c.x + r1 * cosf(t)), (lv_coord_t)lroundf(c.y + r1 * sinf(t)) };
-    lv_point_t p2 = { (lv_coord_t)lroundf(c.x + r2 * cosf(t)), (lv_coord_t)lroundf(c.y + r2 * sinf(t)) };
-    line.width = width;
-    line.color = color;
-    lv_draw_line(ctx, &line, &p1, &p2);
-  };
-  if (max_left > 1) tick(-fminf(max_left, GAUGE_MAX_DEG) * GAUGE_HALF_SPAN / GAUGE_MAX_DEG, 203, 222, 3, COLOR_GREY);
-  if (max_right > 1) tick(fminf(max_right, GAUGE_MAX_DEG) * GAUGE_HALF_SPAN / GAUGE_MAX_DEG, 203, 222, 3, COLOR_GREY);
-  tick(lean_arc, 198, 226, 5, lv_color_white());
+static void Dashes_Draw(lv_event_t *e) { Scale_Arcs(e, COLOR_DASH, 0, 3, 0); }          // grey dashes
+static void Gaps_Draw(lv_event_t *e) { Scale_Arcs(e, lv_color_black(), 3, 2, 1); }      // black gaps
+
+static lv_obj_t *Scale_Layer(lv_obj_t *parent, lv_event_cb_t draw)
+{
+  lv_obj_t *obj = lv_obj_create(parent);
+  lv_obj_remove_style_all(obj);
+  lv_obj_set_size(obj, 2 * SCALE_OUTER + 4, 2 * SCALE_OUTER + 4);
+  lv_obj_center(obj);
+  lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(obj, draw, LV_EVENT_DRAW_MAIN, NULL);
+  return obj;
+}
+
+static lv_obj_t *Tick_Line(lv_obj_t *parent, lv_coord_t width, lv_color_t color)
+{
+  lv_obj_t *line = lv_line_create(parent);
+  lv_obj_set_style_line_width(line, width, 0);
+  lv_obj_set_style_line_color(line, color, 0);
+  lv_obj_set_style_line_rounded(line, true, 0);
+  return line;
+}
+
+// Points a tick line radially at `rel_deg` from 12 o'clock (screen coordinates; the root is full screen)
+static void Place_Tick(lv_obj_t *line, lv_point_t *pts, float rel_deg, int r1, int r2)
+{
+  float t = (270 + rel_deg) * (float)M_PI / 180;
+  lv_point_t a = { (lv_coord_t)lroundf(240 + r1 * cosf(t)), (lv_coord_t)lroundf(240 + r1 * sinf(t)) };
+  lv_point_t b = { (lv_coord_t)lroundf(240 + r2 * cosf(t)), (lv_coord_t)lroundf(240 + r2 * sinf(t)) };
+  if (a.x == pts[0].x && a.y == pts[0].y && b.x == pts[1].x && b.y == pts[1].y) return;   // unchanged
+  pts[0] = a;
+  pts[1] = b;
+  lv_line_set_points(line, pts, 2);
+}
+
+static void Update_Scale(void)
+{
+  float lean_arc = fmaxf(-GAUGE_HALF_SPAN, fminf(GAUGE_HALF_SPAN, lean * GAUGE_HALF_SPAN / GAUGE_MAX_DEG));
+  int end = 270 + (int)lroundf(lean_arc);
+  if (end == 270) {
+    lv_obj_add_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
+    if (end > 270) lv_arc_set_angles(lit_arc, 270, end % 360);
+    else lv_arc_set_angles(lit_arc, end, 270);
+  }
+  Place_Tick(tick_now, tick_pts[0], lean_arc, 198, 226);
+  Place_Tick(tick_max_l, tick_pts[1], -fminf(max_left, GAUGE_MAX_DEG) * GAUGE_HALF_SPAN / GAUGE_MAX_DEG, 203, 222);
+  Place_Tick(tick_max_r, tick_pts[2], fminf(max_right, GAUGE_MAX_DEG) * GAUGE_HALF_SPAN / GAUGE_MAX_DEG, 203, 222);
+  if (max_left > 1) lv_obj_clear_flag(tick_max_l, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(tick_max_l, LV_OBJ_FLAG_HIDDEN);
+  if (max_right > 1) lv_obj_clear_flag(tick_max_r, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(tick_max_r, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Only touch a label when its text actually changes (setting it redraws it)
+static void Set_Text(lv_obj_t *label, const char *text)
+{
+  if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 
 static void Refresh(lv_timer_t *timer)
@@ -189,14 +244,19 @@ static void Refresh(lv_timer_t *timer)
   char text[24];
   int shown = (int)lroundf(fabsf(lean));
   snprintf(text, sizeof(text), "%d" DEGREE, shown);
-  lv_label_set_text(value_label, text);
-  lv_label_set_text(side_label, shown == 0 ? " " : (lean > 0 ? "R" : "L"));
+  Set_Text(value_label, text);
+  Set_Text(side_label, shown == 0 ? " " : (lean > 0 ? "R" : "L"));
   snprintf(text, sizeof(text), "%d" DEGREE, (int)lroundf(max_left));
-  lv_label_set_text(max_l_label, text);
+  Set_Text(max_l_label, text);
   snprintf(text, sizeof(text), "%.2f", fabsf(lat_g));
-  lv_label_set_text(lat_label, text);
+  Set_Text(lat_label, text);
   snprintf(text, sizeof(text), "%d" DEGREE, (int)lroundf(max_right));
-  lv_label_set_text(max_r_label, text);
+  Set_Text(max_r_label, text);
+  Update_Scale();
+
+  static uint8_t drawn_head = 0xFF;            // the graph only changes when a sample is added
+  if (drawn_head != history_head) {
+    drawn_head = history_head;
 
   // Graph: oldest on the left; 45 deg of lean = 24 px either side of the middle. A 5-point
   // moving average on top of the filtered samples keeps the line a smooth curve.
@@ -214,14 +274,14 @@ static void Refresh(lv_timer_t *timer)
     graph_pts[i].y = (lv_coord_t)lroundf(25 - fmaxf(-45, fminf(45, v)) * 24 / 45);
   }
   lv_line_set_points(graph, graph_pts, HISTORY);
+  }
 
   if (calibrated) {
     snprintf(text, sizeof(text), "Calibrated " MIDDLE_DOT " tilt %d" DEGREE, (int)lroundf(tilt_deg));
-    lv_label_set_text(cal_label, text);
+    Set_Text(cal_label, text);
   } else {
-    lv_label_set_text(cal_label, "Calibrating, keep still");
+    Set_Text(cal_label, "Calibrating, keep still");
   }
-  lv_obj_invalidate(gauge);
 }
 
 static lv_obj_t *Label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color)
@@ -260,8 +320,23 @@ void Lean_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_color(root, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-  gauge = Box(root, LV_PCT(100), LV_PCT(100));
-  lv_obj_add_event_cb(gauge, Gauge_Draw, LV_EVENT_DRAW_MAIN, NULL);
+  dashes = Scale_Layer(root, Dashes_Draw);
+  lit_arc = lv_arc_create(root);
+  lv_obj_set_size(lit_arc, 2 * SCALE_OUTER, 2 * SCALE_OUTER);
+  lv_obj_center(lit_arc);
+  lv_obj_remove_style(lit_arc, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(lit_arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(lit_arc, 0, 0);
+  lv_obj_set_style_arc_opa(lit_arc, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(lit_arc, SCALE_WIDTH, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(lit_arc, COLOR_BLUE, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(lit_arc, false, LV_PART_INDICATOR);
+  lv_arc_set_bg_angles(lit_arc, 0, 360);
+  lv_obj_add_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
+  gaps = Scale_Layer(root, Gaps_Draw);
+  tick_max_l = Tick_Line(root, 3, COLOR_GREY);
+  tick_max_r = Tick_Line(root, 3, COLOR_GREY);
+  tick_now = Tick_Line(root, 5, lv_color_white());
 
   lv_obj_t *title = Label(root, &font_small_26, COLOR_GREY);
   lv_label_set_text(title, "LEAN " MIDDLE_DOT " ESTIMATED");
