@@ -473,9 +473,10 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
   Route_Line(path_head, casing_head, NULL, 0);
 }
 
-#define MARKER_W 40       // arrow is 31x37, plus room for a 2 px dark outline all round
-#define MARKER_H 46
-#define MARKER_PAD 4
+#define MARKER_W 44       // arrow is 31x37, plus room for its white border (pointier at the tip)
+#define MARKER_H 50
+#define MARKER_PAD 6
+#define MARKER_BORDER 2.5f
 
 static void Marker_Create(lv_obj_t *parent)
 {
@@ -489,31 +490,42 @@ static void Marker_Create(lv_obj_t *parent)
   lv_obj_set_style_shadow_spread(glow, 2, 0);
   lv_obj_set_style_shadow_opa(glow, LV_OPA_60, 0);
 
-  // Navigation arrow: two triangles make the notched shape. A dark copy drawn shifted 2 px in
-  // every direction first gives it an outline, so it sits cleanly on top of the route line.
+  // Navigation arrow: tip, right corner, notch, left corner. Drawn as two triangles (the shape
+  // is notched, i.e. not convex). The white border is the same shape pushed out by
+  // MARKER_BORDER along every edge (mitred corners), drawn first with smooth edges.
   static lv_color_t buf[LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(MARKER_W, MARKER_H)];
   lv_obj_t *canvas = lv_canvas_create(parent);
   lv_canvas_set_buffer(canvas, buf, MARKER_W, MARKER_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
   lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
+
+  const float shape[4][2] = { {16, 0}, {31, 37}, {16, 27}, {1, 37} };   // clockwise on screen
+  float border[4][2];
+  for (int i = 0; i < 4; i++) {
+    const float *prev = shape[(i + 3) % 4], *cur = shape[i], *next = shape[(i + 1) % 4];
+    // Outward normals of the two edges meeting here (clockwise on screen, y down: (dy, -dx))
+    float e1x = cur[0] - prev[0], e1y = cur[1] - prev[1], l1 = sqrtf(e1x * e1x + e1y * e1y);
+    float e2x = next[0] - cur[0], e2y = next[1] - cur[1], l2 = sqrtf(e2x * e2x + e2y * e2y);
+    float n1x = e1y / l1, n1y = -e1x / l1, n2x = e2y / l2, n2y = -e2x / l2;
+    float mx = n1x + n2x, my = n1y + n2y, lm = sqrtf(mx * mx + my * my);
+    float cos_half = lm / 2;                               // between the normals' bisector and each normal
+    float miter = LV_MIN(MARKER_BORDER / LV_MAX(cos_half, 0.2f), 3 * MARKER_BORDER);
+    border[i][0] = cur[0] + mx / lm * miter;
+    border[i][1] = cur[1] + my / lm * miter;
+  }
+
   lv_draw_rect_dsc_t fill;
   lv_draw_rect_dsc_init(&fill);
   fill.bg_opa = LV_OPA_COVER;
-  const lv_point_t left[]  = { {16, 0}, {16, 27}, {1, 37} };
-  const lv_point_t right[] = { {16, 0}, {31, 37}, {16, 27} };
-  auto draw = [&](int dx, int dy, lv_color_t color) {
-    lv_point_t l[3], r[3];
-    for (int i = 0; i < 3; i++) {
-      l[i] = { (lv_coord_t)(left[i].x + MARKER_PAD + dx), (lv_coord_t)(left[i].y + MARKER_PAD + dy) };
-      r[i] = { (lv_coord_t)(right[i].x + MARKER_PAD + dx), (lv_coord_t)(right[i].y + MARKER_PAD + dy) };
-    }
+  auto draw = [&](const float (*p)[2], lv_color_t color) {
+    auto pt = [&](int i) { return lv_point_t{ (lv_coord_t)lroundf(p[i][0] + MARKER_PAD), (lv_coord_t)lroundf(p[i][1] + MARKER_PAD) }; };
+    lv_point_t left[]  = { pt(0), pt(2), pt(3) };          // tip, notch, left corner
+    lv_point_t right[] = { pt(0), pt(1), pt(2) };          // tip, right corner, notch
     fill.bg_color = color;
-    lv_canvas_draw_polygon(canvas, l, 3, &fill);
-    lv_canvas_draw_polygon(canvas, r, 3, &fill);
+    lv_canvas_draw_polygon(canvas, left, 3, &fill);
+    lv_canvas_draw_polygon(canvas, right, 3, &fill);
   };
-  for (int dx = -2; dx <= 2; dx += 2)
-    for (int dy = -2; dy <= 2; dy += 2)
-      if (dx || dy) draw(dx, dy, lv_color_hex(0x0A0F1A));
-  draw(0, 0, COLOR_BLUE);
+  draw(border, lv_color_white());
+  draw(shape, COLOR_BLUE);
   lv_obj_set_pos(canvas, MARKER_X - 16 - MARKER_PAD, MARKER_Y - MARKER_H / 2);
 }
 

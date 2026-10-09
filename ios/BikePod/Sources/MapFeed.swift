@@ -10,6 +10,8 @@ final class MapFeed {
     private(set) var areaID = 0
     private(set) var frame: MapArea.Frame?
     private(set) var areaLines: [String] = []
+    /// The area before the current one: the pod may still be showing it while the new one arrives
+    private var previous: (id: Int, frame: MapArea.Frame)?
     private var building = false
     private var tileTemplate: String?
     private var decoded: [String: [MapRoad]] = [:]       // tile key -> roads, in memory
@@ -45,6 +47,7 @@ final class MapFeed {
             let lines = await Task.detached(priority: .utility) {
                 MapArea.lines(id: nextID, frame: newFrame, roads: roads)
             }.value
+            if let frame { previous = (areaID, frame) }
             areaID = nextID
             frame = newFrame
             areaLines = lines
@@ -55,6 +58,13 @@ final class MapFeed {
     func pose(lat: Double, lng: Double, headingDegrees: Double) -> String? {
         guard let frame else { return nil }
         return MapArea.pose(id: areaID, frame: frame, lat: lat, lng: lng, headingDegrees: headingDegrees)
+    }
+
+    /// The same pose in the previous area's frame, so the pod can keep drawing that area until
+    /// the new one has fully arrived (otherwise the map blinks out at every area switch)
+    func previousPose(lat: Double, lng: Double, headingDegrees: Double) -> String? {
+        guard let previous else { return nil }
+        return MapArea.pose(id: previous.id, frame: previous.frame, lat: lat, lng: lng, headingDegrees: headingDegrees)
     }
 
     /// The tile URL pattern changes when OpenFreeMap publishes new data: read it from their TileJSON

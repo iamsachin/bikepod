@@ -35,9 +35,12 @@ static const uint32_t road_color[4] = { 0, 0x4A4A4A, 0x3A3A3A, 0x2C2C2C };
 static lv_obj_t *layer;
 static lv_coord_t center_x, center_y;
 static float scale = 0;               // pixels per metre (set with the route drawing's zoom)
-static bool have_pose = false;
-static uint16_t pose_area = 0;
-static float pose_x, pose_y, pose_sin, pose_cos;
+// The rider's pose in up to two areas: while the phone switches to a new area it sends the pose
+// for both, so whichever area is on screen always has a matching pose (no flicker at the switch)
+struct Pose { bool valid; uint16_t area; float x, y, sin_h, cos_h; uint32_t at; };
+static Pose poses[2];
+static const Pose *pose = NULL;         // the pose matching the area being drawn
+static void Pick_Pose(void);
 
 /******************************* Bluetooth task side *******************************/
 void Map_Data_Begin(uint16_t area_id)
@@ -95,19 +98,29 @@ void Map_Layer_Poll(void)
     building->id = 0xFFFF;                    // so the next MAP line starts a fresh area
   }
   portEXIT_CRITICAL(&map_lock);
-  if (next && layer) lv_obj_invalidate(layer);
+  if (next) {
+    Pick_Pose();
+    if (layer) lv_obj_invalidate(layer);
+  }
+}
+
+static void Pick_Pose(void)
+{
+  pose = NULL;
+  for (int i = 0; i < 2; i++)
+    if (active && poses[i].valid && poses[i].area == active->id) pose = &poses[i];
 }
 
 void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
 {
+  // Update this area's slot, or replace the older slot
+  int slot = poses[0].valid && poses[0].area == area_id ? 0
+           : poses[1].valid && poses[1].area == area_id ? 1
+           : (!poses[0].valid || (poses[1].valid && poses[0].at < poses[1].at)) ? 0 : 1;
   float h = heading_deg * (float)M_PI / 180;
-  pose_area = area_id;
-  pose_x = x;
-  pose_y = y;
-  pose_sin = sinf(h);
-  pose_cos = cosf(h);
-  have_pose = true;
-  if (layer) lv_obj_invalidate(layer);
+  poses[slot] = { true, area_id, (float)x, (float)y, sinf(h), cosf(h), lv_tick_get() };
+  Pick_Pose();
+  if (layer && pose == &poses[slot]) lv_obj_invalidate(layer);
 }
 
 void Map_Layer_Set_Scale(float pixels_per_metre)
@@ -119,21 +132,22 @@ void Map_Layer_Set_Scale(float pixels_per_metre)
 
 bool Map_Layer_Has_Map(void)
 {
-  return active && have_pose && pose_area == active->id;
+  return active && pose;
 }
 
 void Map_Layer_Clear(void)
 {
-  have_pose = false;
+  poses[0].valid = poses[1].valid = false;
+  pose = NULL;
   if (layer) lv_obj_invalidate(layer);
 }
 
 // Rotate the area's north-up metres into the rider's heading-up view, in screen pixels
 static inline lv_point_t To_Screen(const lv_area_t *box, const int16_t *p)
 {
-  float dx = p[0] - pose_x, dy = p[1] - pose_y;
-  float right = dx * pose_cos - dy * pose_sin;
-  float ahead = dx * pose_sin + dy * pose_cos;
+  float dx = p[0] - pose->x, dy = p[1] - pose->y;
+  float right = dx * pose->cos_h - dy * pose->sin_h;
+  float ahead = dx * pose->sin_h + dy * pose->cos_h;
   lv_point_t s = { (lv_coord_t)lroundf(box->x1 + center_x + right * scale),
                    (lv_coord_t)lroundf(box->y1 + center_y - ahead * scale) };
   return s;
