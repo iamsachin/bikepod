@@ -214,9 +214,15 @@ static void Place_Tick(lv_obj_t *line, lv_point_t *pts, float rel_deg, int r1, i
   lv_line_set_points(line, pts, 2);
 }
 
+// What's on screen glides towards the measured lean instead of jumping: each frame it covers a
+// share of the gap that depends on the frame time (an exponential ease, ~70 ms time constant).
+// Fast enough to keep up with a quick flick, and it hides small sensor jitter.
+#define DISPLAY_EASE_S  0.07f
+static float shown_lean = 0;
+
 static void Update_Scale(void)
 {
-  float lean_arc = fmaxf(-GAUGE_HALF_SPAN, fminf(GAUGE_HALF_SPAN, lean * GAUGE_HALF_SPAN / GAUGE_MAX_DEG));
+  float lean_arc = fmaxf(-GAUGE_HALF_SPAN, fminf(GAUGE_HALF_SPAN, shown_lean * GAUGE_HALF_SPAN / GAUGE_MAX_DEG));
   int end = 270 + (int)lroundf(lean_arc);
   if (end == 270) {
     lv_obj_add_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
@@ -240,12 +246,20 @@ static void Set_Text(lv_obj_t *label, const char *text)
 
 static void Refresh(lv_timer_t *timer)
 {
-  if (!visible) return;
+  static uint32_t last_ms = 0;
+  float dt = last_ms ? lv_tick_elaps(last_ms) / 1000.0f : 0;
+  last_ms = lv_tick_get();
+  if (!visible) {
+    shown_lean = lean;                         // no catching-up animation when the screen appears
+    return;
+  }
+  shown_lean += (lean - shown_lean) * (1 - expf(-dt / DISPLAY_EASE_S));
+
   char text[24];
-  int shown = (int)lroundf(fabsf(lean));
+  int shown = (int)lroundf(fabsf(shown_lean));
   snprintf(text, sizeof(text), "%d" DEGREE, shown);
   Set_Text(value_label, text);
-  Set_Text(side_label, shown == 0 ? " " : (lean > 0 ? "R" : "L"));
+  Set_Text(side_label, shown == 0 ? " " : (shown_lean > 0 ? "R" : "L"));
   snprintf(text, sizeof(text), "%d" DEGREE, (int)lroundf(max_left));
   Set_Text(max_l_label, text);
   snprintf(text, sizeof(text), "%.2f", fabsf(lat_g));
@@ -393,7 +407,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   QMI8658_Init();                     // gyro range 256 deg/s: see gyro_scale in Gyro_QMI8658.cpp
   Lean_Calibrate();
   lv_timer_create(Sample, SAMPLE_MS, NULL);
-  lv_timer_create(Refresh, 33, NULL);   // ~30 updates a second
+  lv_timer_create(Refresh, 16, NULL);   // ~60 updates a second: only small strips are redrawn
 }
 
 void Lean_Screen_Show(bool show)
