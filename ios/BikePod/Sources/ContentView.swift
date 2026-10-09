@@ -18,6 +18,9 @@ struct ContentView: View {
 
     @State private var search = PlaceSearch()
     @State private var recents = RecentPlaces()
+    @State private var start: Place?              // nil: start from my location
+    @State private var destination: Place?
+    @State private var pickingStart = false        // the search box is choosing the starting point
     @State private var query = ""
     @State private var camera: MapViewCamera = .trackUserLocation(zoom: 14)
     @State private var simulate = true
@@ -74,9 +77,10 @@ struct ContentView: View {
 
     private var searchPanel: some View {
         VStack(spacing: 8) {
+            startRow
             HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Where to?", text: $query)
+                Image(systemName: pickingStart ? "location.circle" : "magnifyingglass").foregroundStyle(.secondary)
+                TextField(pickingStart ? "Starting point" : "Where to?", text: $query)
                     .focused($searchFocused)
                     .submitLabel(.search)
                     .autocorrectionDisabled()
@@ -98,21 +102,65 @@ struct ContentView: View {
 
             if searchFocused, !search.results.isEmpty {
                 placeList(search.results, icon: "mappin.circle")
-            } else if searchFocused, query.isEmpty, !recents.places.isEmpty {
+            } else if searchFocused, query.isEmpty, !recents.places.isEmpty || pickingStart {
                 placeList(recents.places, icon: "clock.arrow.circlepath", title: "Recent")
             }
             if let error = search.error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
         }
-        .onChange(of: query) { _, text in
-            search.search(text, near: navigator.currentCoordinate)
+        .onChange(of: searchFocused) { _, focused in
+            if !focused, pickingStart {          // tapped away while choosing a start: back to "Where to?"
+                pickingStart = false
+                query = destination?.name ?? ""
+            }
         }
+        .onChange(of: query) { _, text in
+            search.search(text, near: start?.coordinate ?? navigator.currentCoordinate)
+        }
+    }
+
+    /// "From: My location" / "From: Agara Lake ✕". Tapping it makes the search box pick the start.
+    private var startRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                pickingStart = true
+                query = ""
+                searchFocused = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: start == nil ? "location.fill" : "mappin.and.ellipse")
+                    Text("From: ").foregroundStyle(.secondary) + Text(start?.name ?? "My location")
+                }
+                .font(.subheadline)
+                .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            if start != nil {
+                Button { setStart(nil) } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Start from my location")
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func placeList(_ places: [Place], icon: String, title: String? = nil) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if pickingStart {
+                    Button { setStart(nil) } label: {
+                        Label("My location", systemImage: "location.fill")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
+                    }
+                    Divider()
+                }
                 if let title {
                     Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .padding(.horizontal, 12).padding(.top, 10)
@@ -163,8 +211,13 @@ struct ContentView: View {
                     Text(navigator.destinationName).font(.headline).lineLimit(2)
                     Text("\(route.distanceText) · \(route.durationText) by motorcycle")
                         .foregroundStyle(.secondary)
-                    Toggle("Simulate the ride", isOn: $simulate)
-                    if simulate {
+                    if navigator.routeStartsElsewhere {
+                        Label("Starts away from you, so the ride is simulated", systemImage: "info.circle")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Toggle("Simulate the ride", isOn: $simulate)
+                    }
+                    if simulate || navigator.routeStartsElsewhere {
                         Picker("Speed", selection: $speedUp) {
                             Text("1×").tag(UInt64(1))
                             Text("4×").tag(UInt64(4))
@@ -173,7 +226,11 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                     }
                     HStack {
-                        Button("Cancel") { navigator.stop(); camera = .trackUserLocation(zoom: 14) }
+                        Button("Cancel") {
+                            navigator.stop()
+                            destination = nil
+                            camera = .trackUserLocation(zoom: 14)
+                        }
                             .buttonStyle(.bordered)
                         Button { startNavigation() } label: {
                             Text("Start").frame(maxWidth: .infinity)
@@ -216,15 +273,36 @@ struct ContentView: View {
 
     private func choose(_ place: Place) {
         recents.remember(place)
+        search.clear()
+        if pickingStart {
+            setStart(place)
+            return
+        }
         searchFocused = false
         query = place.name
+        destination = place
+        planRoute()
+    }
+
+    private func setStart(_ place: Place?) {
+        start = place
+        pickingStart = false
+        searchFocused = false
+        query = destination?.name ?? ""
         search.clear()
-        Task { await navigator.planRoute(to: place.coordinate, name: place.name) }
+        if destination != nil { planRoute() }
+    }
+
+    private func planRoute() {
+        guard let destination else { return }
+        let from = start?.coordinate
+        Task { await navigator.planRoute(from: from, to: destination.coordinate, name: destination.name) }
     }
 
     private func clearSearch() {
         query = ""
         search.clear()
+        if pickingStart { pickingStart = false; query = destination?.name ?? "" }
     }
 
     private func startNavigation() {

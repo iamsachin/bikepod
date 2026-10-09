@@ -25,6 +25,9 @@ final class Navigator {
 
     private(set) var phase: Phase = .idle
     private(set) var destinationName = ""
+    /// True when the previewed route starts somewhere other than the rider (chosen in the app):
+    /// such a route can only be simulated, since real guidance follows the phone's own GPS.
+    private(set) var routeStartsElsewhere = false
     private(set) var instruction = ""
     private(set) var distanceToTurn = 0
     private(set) var remainingKm = 0.0
@@ -99,12 +102,19 @@ final class Navigator {
     }
 
     /// Step 1: ask Valhalla for a motorcycle route from here and show it.
-    func planRoute(to destination: CLLocationCoordinate2D, name: String) async {
+    /// - Parameter start: where the route starts; nil = the phone's current position
+    func planRoute(from start: CLLocationCoordinate2D? = nil, to destination: CLLocationCoordinate2D, name: String) async {
         stop()
-        guard let origin = device.lastLocation else {
+        let origin: UserLocation
+        if let start {
+            origin = UserLocation(clCoordinateLocation2D: start)
+        } else if let here = device.lastLocation {
+            origin = here
+        } else {
             phase = .failed("No GPS position yet. Wait a few seconds and try again.")
             return
         }
+        routeStartsElsewhere = start != nil
         destinationName = name
         phase = .routing
         let requestID = UUID()
@@ -135,6 +145,7 @@ final class Navigator {
     ///   - speedUp: simulation speed multiplier (1 = about 36 km/h)
     func startNavigation(simulate: Bool, speedUp: UInt64) {
         guard case let .preview(route) = phase else { return }
+        let simulate = simulate || routeStartsElsewhere
         do {
             let core = try makeCore(simulate ? simulated : device)
             if simulate {
