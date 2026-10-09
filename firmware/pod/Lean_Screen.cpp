@@ -68,11 +68,12 @@ static uint8_t history_head = 0;
 
 // UI
 static lv_obj_t *root;
-// Top scale, split so a change only redraws a small strip: static grey dashes, a blue arc for
-// the lean, a static layer of black gaps over it (turning the arc into dashes), and small tick lines
-static lv_obj_t *dashes;
-static lv_obj_t *lit_arc;
-static lv_obj_t *gaps;
+// Top scale: each dash is its own short thick line (cheap to redraw, unlike LVGL arcs, which are
+// processed whenever anything inside their circle redraws), recoloured blue when lit
+#define DASH_COUNT 40
+static lv_obj_t *dash_lines[DASH_COUNT];
+static lv_point_t dash_pts[DASH_COUNT][2];
+static bool dash_lit[DASH_COUNT];
 static lv_obj_t *tick_now, *tick_max_l, *tick_max_r;
 static lv_point_t tick_pts[3][2];
 static lv_obj_t *value_label, *side_label;
@@ -158,40 +159,7 @@ void Lean_Calibrate(void)
 
 /*********************************** Drawing ***********************************/
 // Scale geometry: dashes of 3 degrees every 5 degrees, from 100 degrees left of 12 o'clock to
-// 100 right (60 deg of lean at each end). LVGL angles: 0 = 3 o'clock, clockwise, so 270 = top.
-#define SCALE_OUTER   220
-#define SCALE_WIDTH   10
-#define SCALE_START   (270 - GAUGE_HALF_SPAN)
-#define SCALE_END     (270 + GAUGE_HALF_SPAN)
-
-// grow: extra pixels each side (the black gaps are drawn slightly wider so they fully cut the blue)
-static void Scale_Arcs(lv_event_t *e, lv_color_t color, int from, int len, int grow)
-{
-  lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
-  lv_obj_t *obj = lv_event_get_target(e);
-  lv_area_t box;
-  lv_obj_get_coords(obj, &box);
-  lv_point_t c = { (lv_coord_t)((box.x1 + box.x2) / 2), (lv_coord_t)((box.y1 + box.y2) / 2) };
-  lv_draw_arc_dsc_t arc;
-  lv_draw_arc_dsc_init(&arc);
-  arc.width = SCALE_WIDTH + 2 * grow;
-  arc.color = color;
-  for (int a = SCALE_START + from; a < SCALE_END; a += 5) lv_draw_arc(ctx, &arc, &c, SCALE_OUTER + grow, a % 360, (a + len) % 360);
-}
-
-static void Dashes_Draw(lv_event_t *e) { Scale_Arcs(e, COLOR_DASH, 0, 3, 0); }          // grey dashes
-static void Gaps_Draw(lv_event_t *e) { Scale_Arcs(e, lv_color_black(), 3, 2, 1); }      // black gaps
-
-static lv_obj_t *Scale_Layer(lv_obj_t *parent, lv_event_cb_t draw)
-{
-  lv_obj_t *obj = lv_obj_create(parent);
-  lv_obj_remove_style_all(obj);
-  lv_obj_set_size(obj, 2 * SCALE_OUTER + 4, 2 * SCALE_OUTER + 4);
-  lv_obj_center(obj);
-  lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(obj, draw, LV_EVENT_DRAW_MAIN, NULL);
-  return obj;
-}
+// 100 right (60 deg of lean at each end). Angles are clockwise from 3 o'clock, so 270 = top.
 
 static lv_obj_t *Tick_Line(lv_obj_t *parent, lv_coord_t width, lv_color_t color)
 {
@@ -202,16 +170,31 @@ static lv_obj_t *Tick_Line(lv_obj_t *parent, lv_coord_t width, lv_color_t color)
   return line;
 }
 
-// Points a tick line radially at `rel_deg` from 12 o'clock (screen coordinates; the root is full screen)
+// Sets a 2-point line from screen coordinates. An LVGL line object's box runs from its own
+// position to its furthest point, so with screen coordinates every tick and dash had a box
+// covering half the screen, and any change redrew all of it. Placing the object at the line's
+// own corner keeps its box (and every redraw) just around the line.
+static void Set_Line(lv_obj_t *line, lv_point_t *pts, lv_point_t a, lv_point_t b, lv_coord_t width)
+{
+  lv_coord_t ox = LV_MIN(a.x, b.x) - width, oy = LV_MIN(a.y, b.y) - width;
+  pts[0] = { (lv_coord_t)(a.x - ox), (lv_coord_t)(a.y - oy) };
+  pts[1] = { (lv_coord_t)(b.x - ox), (lv_coord_t)(b.y - oy) };
+  lv_obj_set_pos(line, ox, oy);
+  lv_line_set_points(line, pts, 2);
+}
+
+// Points a tick line radially at `rel_deg` from 12 o'clock
 static void Place_Tick(lv_obj_t *line, lv_point_t *pts, float rel_deg, int r1, int r2)
 {
   float t = (270 + rel_deg) * (float)M_PI / 180;
   lv_point_t a = { (lv_coord_t)lroundf(240 + r1 * cosf(t)), (lv_coord_t)lroundf(240 + r1 * sinf(t)) };
   lv_point_t b = { (lv_coord_t)lroundf(240 + r2 * cosf(t)), (lv_coord_t)lroundf(240 + r2 * sinf(t)) };
-  if (a.x == pts[0].x && a.y == pts[0].y && b.x == pts[1].x && b.y == pts[1].y) return;   // unchanged
-  pts[0] = a;
-  pts[1] = b;
-  lv_line_set_points(line, pts, 2);
+  static lv_point_t last[3][2];                      // screen positions last drawn, per tick
+  int k = pts == tick_pts[0] ? 0 : pts == tick_pts[1] ? 1 : 2;
+  if (a.x == last[k][0].x && a.y == last[k][0].y && b.x == last[k][1].x && b.y == last[k][1].y) return;
+  last[k][0] = a;
+  last[k][1] = b;
+  Set_Line(line, pts, a, b, lv_obj_get_style_line_width(line, 0));
 }
 
 // What's on screen glides towards the measured lean instead of jumping: each frame it covers a
@@ -223,13 +206,14 @@ static float shown_lean = 0;
 static void Update_Scale(void)
 {
   float lean_arc = fmaxf(-GAUGE_HALF_SPAN, fminf(GAUGE_HALF_SPAN, shown_lean * GAUGE_HALF_SPAN / GAUGE_MAX_DEG));
-  int end = 270 + (int)lroundf(lean_arc);
-  if (end == 270) {
-    lv_obj_add_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_clear_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
-    if (end > 270) lv_arc_set_angles(lit_arc, 270, end % 360);
-    else lv_arc_set_angles(lit_arc, end, 270);
+  // Light the dashes between upright and the lean (a dash is lit when its middle is passed)
+  for (int i = 0; i < DASH_COUNT; i++) {
+    float mid = -GAUGE_HALF_SPAN + i * 5 + 1.5f;       // dash centre, degrees from 12 o'clock
+    bool lit = (lean_arc > 0 && mid > 0 && mid < lean_arc) || (lean_arc < 0 && mid < 0 && mid > lean_arc);
+    if (lit != dash_lit[i]) {
+      dash_lit[i] = lit;
+      lv_obj_set_style_line_color(dash_lines[i], lit ? COLOR_BLUE : COLOR_DASH, 0);
+    }
   }
   Place_Tick(tick_now, tick_pts[0], lean_arc, 198, 226);
   Place_Tick(tick_max_l, tick_pts[1], -fminf(max_left, GAUGE_MAX_DEG) * GAUGE_HALF_SPAN / GAUGE_MAX_DEG, 203, 222);
@@ -334,20 +318,18 @@ void Lean_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_color(root, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-  dashes = Scale_Layer(root, Dashes_Draw);
-  lit_arc = lv_arc_create(root);
-  lv_obj_set_size(lit_arc, 2 * SCALE_OUTER, 2 * SCALE_OUTER);
-  lv_obj_center(lit_arc);
-  lv_obj_remove_style(lit_arc, NULL, LV_PART_KNOB);
-  lv_obj_clear_flag(lit_arc, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_pad_all(lit_arc, 0, 0);
-  lv_obj_set_style_arc_opa(lit_arc, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(lit_arc, SCALE_WIDTH, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(lit_arc, COLOR_BLUE, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_rounded(lit_arc, false, LV_PART_INDICATOR);
-  lv_arc_set_bg_angles(lit_arc, 0, 360);
-  lv_obj_add_flag(lit_arc, LV_OBJ_FLAG_HIDDEN);
-  gaps = Scale_Layer(root, Gaps_Draw);
+  // Dashes: 3 degrees long every 5 degrees on the 215 px circle, each a straight chord (on this
+  // circle a 3 degree arc is within a fraction of a pixel of straight)
+  for (int i = 0; i < DASH_COUNT; i++) {
+    float a0 = (270 - GAUGE_HALF_SPAN + i * 5) * (float)M_PI / 180, a1 = a0 + 3 * (float)M_PI / 180;
+    lv_point_t p0 = { (lv_coord_t)lroundf(240 + 215 * cosf(a0)), (lv_coord_t)lroundf(240 + 215 * sinf(a0)) };
+    lv_point_t p1 = { (lv_coord_t)lroundf(240 + 215 * cosf(a1)), (lv_coord_t)lroundf(240 + 215 * sinf(a1)) };
+    dash_lines[i] = lv_line_create(root);
+    lv_obj_set_style_line_width(dash_lines[i], 10, 0);
+    Set_Line(dash_lines[i], dash_pts[i], p0, p1, 10);
+    lv_obj_set_style_line_color(dash_lines[i], COLOR_DASH, 0);
+    dash_lit[i] = false;
+  }
   tick_max_l = Tick_Line(root, 3, COLOR_GREY);
   tick_max_r = Tick_Line(root, 3, COLOR_GREY);
   tick_now = Tick_Line(root, 5, lv_color_white());
