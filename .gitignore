@@ -1,0 +1,6 @@
+# Downloads kept for reference (large zips, fonts, vendor demo); not part of our code
+temp/
+
+# macOS and build output
+.DS_Store
+build/
