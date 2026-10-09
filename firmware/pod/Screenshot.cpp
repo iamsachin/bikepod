@@ -8,6 +8,9 @@
 #include "mbedtls/base64.h"
 #include "Display_ST7701.h"
 #include "BLE_Link.h"
+#include "Pages.h"
+#include "Lean_Screen.h"
+#include "Gyro_QMI8658.h"
 
 volatile bool screenshot_sending = false;
 bool perf_report = false;
@@ -60,7 +63,8 @@ static void Screenshot_Send(void)
   screenshot_sending = false;
 }
 
-// Serial commands from the Mac: "shot", "msg <line>" (inject a phone line), "test off", "perf"
+// Serial commands from the Mac: "shot", "msg <line>" (inject a phone line), "test off", "perf",
+// "page <n>" (switch screen), "cal" (recalibrate lean), "imu" (print sensor readings)
 void Screenshot_Poll(void)
 {
   static char cmd[256];
@@ -73,6 +77,10 @@ void Screenshot_Poll(void)
       else if (strncmp(cmd, "msg ", 4) == 0) BLE_Link_Inject(String(cmd + 4));
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
+      else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
+      else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
+      else if (strcmp(cmd, "imu") == 0)
+        printf("IMU acc %.2f %.2f %.2f g, gyro %.1f %.1f %.1f dps\r\n", Accel.x, Accel.y, Accel.z, Gyro.x, Gyro.y, Gyro.z);
       len = 0;
     } else if (len < sizeof(cmd) - 1) {
       cmd[len++] = c;

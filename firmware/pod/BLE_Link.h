@@ -16,6 +16,7 @@
 //                             metres north-up from the area's reference point
 //   MAPEND|7|96               area 7 complete with 96 roads: the pod switches to it
 //   POSE|7|12,-40,85          rider in area 7's frame: x, y metres and heading in degrees
+//   SPD|123                   GPS speed in tenths of a metre per second (for the lean estimate)
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -27,7 +28,7 @@
 #define NAV_PATH_MAX_POINTS   24
 #define NAV_MAX_STUBS         16
 
-enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_POSE, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
+enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
 
 struct Nav_Message {
   Msg_Kind kind;
@@ -42,6 +43,8 @@ struct Nav_Message {
   uint32_t trip_min;
   // MSG_CRUISE
   uint32_t speed_kmh;
+  // MSG_SPEED
+  float speed_mps;
   // MSG_PATH
   uint8_t path_count;
   int16_t path[NAV_PATH_MAX_POINTS][2];

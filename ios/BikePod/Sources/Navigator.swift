@@ -254,8 +254,20 @@ final class Navigator {
         return f
     }()
 
+    /// GPS speed for the pod's lean estimate, in tenths of a metre per second (simulated rides
+    /// report the simulated speed)
+    private var speedLine: String {
+        let location = phase == .navigating ? navState?.preferredUserLocation : device.lastLocation
+        let metresPerSecond = max(0, location?.speed?.value ?? 0)
+        return "SPD|\(Int((metresPerSecond * 10).rounded()))"
+    }
+
     /// What the pod should be showing right now, as (kind, line) pairs (see BLE_Link.h on the pod).
     private var podLines: [(kind: String, line: String)] {
+        [("speed", speedLine)] + screenLines
+    }
+
+    private var screenLines: [(kind: String, line: String)] {
         switch phase {
         case .navigating:
             if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
@@ -295,7 +307,7 @@ final class Navigator {
             let last = lastPodSent[kind]
             let age = now.timeIntervalSince(last?.at ?? .distantPast)
             let changed = line != last?.line
-            let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose")
+            let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose") || kind == "speed"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
             link.send(line: line, kind: kind)

@@ -11,6 +11,8 @@
 #include "BLE_Link.h"
 #include "Screenshot.h"
 #include "Map_Layer.h"
+#include "Lean_Screen.h"
+#include "Pages.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -53,6 +55,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
       case MSG_PATH:    Nav_Screen_Set_Path(msg.path, msg.path_count); break;
       case MSG_STUB:    Nav_Screen_Set_Stubs(msg.stubs, msg.stub_count); break;
+      case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
       case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); break;
@@ -82,6 +85,8 @@ void setup()
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
+  Lean_Screen_Create(lv_scr_act()); // hidden until you swipe right; calibrates: keep still at power-on
+  Pages_Init();
   BLE_Link_Init();
   lv_timer_create(Pod_Tick, 50, NULL);
   printf("Pod ready\r\n");

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 32 px
  * Bpp: 4
- * Opts: --font /Users/sachin/Desktop/learn/bircle/temp/fonts/barlow/Barlow-SemiBold.ttf -r 0x20-0x7E,0xB7 --size 32 --bpp 4 --format lvgl --no-compress --lv-include lvgl.h -o font_text_32.c
+ * Opts: --font /Users/sachin/Desktop/learn/bircle/temp/fonts/barlow/Barlow-SemiBold.ttf -r 0x20-0x7E,0xB0,0xB7 --size 32 --bpp 4 --format lvgl --no-compress --lv-include lvgl.h -o font_text_32.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -2005,6 +2005,17 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     0x2, 0x9f, 0xff, 0xff, 0xf9, 0x0, 0x13, 0x0,
     0x0, 0x29, 0xef, 0xc5, 0x0,
 
+    /* U+00B0 "°" */
+    0x0, 0x4, 0xbe, 0xfc, 0x50, 0x0, 0x0, 0x9f,
+    0xff, 0xff, 0xfa, 0x0, 0x6, 0xff, 0xe9, 0x8e,
+    0xff, 0x70, 0xe, 0xfd, 0x10, 0x0, 0xcf, 0xe0,
+    0x2f, 0xf5, 0x0, 0x0, 0x4f, 0xf3, 0x4f, 0xf3,
+    0x0, 0x0, 0x2f, 0xf5, 0x2f, 0xf6, 0x0, 0x0,
+    0x5f, 0xf3, 0xe, 0xfe, 0x10, 0x1, 0xdf, 0xe0,
+    0x6, 0xff, 0xe9, 0x9e, 0xff, 0x70, 0x0, 0x8f,
+    0xff, 0xff, 0xfa, 0x0, 0x0, 0x4, 0xbe, 0xfc,
+    0x50, 0x0,
+
     /* U+00B7 "·" */
     0x4, 0x96, 0x4, 0xff, 0xf8, 0x9f, 0xff, 0xd7,
     0xff, 0xfb, 0xa, 0xfc, 0x20
@@ -2112,14 +2123,17 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 13851, .adv_w = 97, .box_w = 4, .box_h = 28, .ofs_x = 1, .ofs_y = -3},
     {.bitmap_index = 13907, .adv_w = 179, .box_w = 10, .box_h = 31, .ofs_x = 1, .ofs_y = -5},
     {.bitmap_index = 14062, .adv_w = 267, .box_w = 15, .box_h = 6, .ofs_x = 1, .ofs_y = 7},
-    {.bitmap_index = 14107, .adv_w = 116, .box_w = 5, .box_h = 5, .ofs_x = 1, .ofs_y = 7}
+    {.bitmap_index = 14107, .adv_w = 194, .box_w = 12, .box_h = 11, .ofs_x = 0, .ofs_y = 16},
+    {.bitmap_index = 14173, .adv_w = 116, .box_w = 5, .box_h = 5, .ofs_x = 1, .ofs_y = 7}
 };
 
 /*---------------------
  *  CHARACTER MAPPING
  *--------------------*/
 
-
+static const uint16_t unicode_list_1[] = {
+    0x0, 0x7
+};
 
 /*Collect the unicode lists and glyph_id offsets*/
 static const lv_font_fmt_txt_cmap_t cmaps[] =
@@ -2129,8 +2143,8 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
         .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
     },
     {
-        .range_start = 183, .range_length = 1, .glyph_id_start = 96,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
+        .range_start = 176, .range_length = 8, .glyph_id_start = 96,
+        .unicode_list = unicode_list_1, .glyph_id_ofs_list = NULL, .list_length = 2, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
 
@@ -2154,7 +2168,7 @@ static const uint8_t kern_left_class_mapping[] =
     37, 33, 38, 0, 39, 40, 33, 33,
     3, 33, 37, 41, 42, 43, 0, 44,
     44, 45, 44, 0, 0, 0, 0, 0,
-    0
+    0, 0
 };
 
 /*Map glyph_ids to kern right classes*/
@@ -2172,7 +2186,7 @@ static const uint8_t kern_right_class_mapping[] =
     28, 26, 29, 30, 26, 31, 32, 32,
     3, 32, 28, 32, 33, 27, 34, 35,
     35, 36, 35, 37, 0, 0, 0, 0,
-    0
+    0, 0
 };
 
 /*Kern values between classes*/
@@ -2438,7 +2452,7 @@ lv_font_t font_text_32 = {
 #endif
     .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,    /*Function pointer to get glyph's data*/
     .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,    /*Function pointer to get glyph's bitmap*/
-    .line_height = 32,          /*The maximum line height required by the font*/
+    .line_height = 33,          /*The maximum line height required by the font*/
     .base_line = 6,             /*Baseline measured from the bottom of the line*/
 #if !(LVGL_VERSION_MAJOR == 6 && LVGL_VERSION_MINOR == 0)
     .subpx = LV_FONT_SUBPX_NONE,
