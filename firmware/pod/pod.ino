@@ -44,6 +44,7 @@ void setup()
   LCD_Init();                       // screen, touch, backlight
   Set_Backlight(100);               // full brightness for daylight
   Lvgl_Init();
+  lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();
   Nav_Fake_Data_Start();

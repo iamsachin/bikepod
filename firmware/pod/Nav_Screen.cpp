@@ -5,6 +5,7 @@
 ******************************************************************************/
 #include "Nav_Screen.h"
 #include <stdio.h>
+#include <math.h>
 
 LV_FONT_DECLARE(font_dist_132);   // Inter Display Bold, digits and "." only
 LV_FONT_DECLARE(font_unit_44);    // Inter SemiBold, ASCII
@@ -46,6 +47,70 @@ static lv_obj_t *Arrow_Line_Create(lv_obj_t *parent)
   return line;
 }
 
+/******************************** Smooth progress ring ********************************
+ * Updates arrive roughly once per GPS fix, at uneven intervals. Instead of jumping (or
+ * restarting an animation each time), the ring keeps moving at the measured speed between
+ * updates and eases towards each new value. LVGL 8 draws arcs in whole degrees (about 4 px at
+ * this radius), so a round dot drawn at the exact tip position hides those 4 px steps.
+ ***************************************************************************************/
+#define RING_FRAME_MS     16                          // ~60 fps
+#define RING_RADIUS       ((RING_SIZE - RING_WIDTH) / 2)  // centre line of the ring
+#define RING_MAX_COAST_MS 1500                        // stop predicting if updates stop
+
+static lv_obj_t *ring_tip;
+static float ring_target = 0;     // last value received (0..1000)
+static float ring_rate = 0;       // measured speed, units per ms
+static float ring_shown = 0;      // value currently drawn
+static uint32_t ring_target_ms = 0;
+
+static void Ring_Draw(float value)
+{
+  int32_t deg = (int32_t)(value * 360.0f / 1000.0f);   // whole degrees, always behind the tip
+  lv_arc_set_value(ring, deg);
+
+  if (value <= 0) {
+    lv_obj_add_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  float rad = value / 1000.0f * 2.0f * (float)M_PI;     // 0 = 12 o'clock, clockwise
+  lv_obj_clear_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_align(ring_tip, LV_ALIGN_CENTER,
+               (lv_coord_t)lroundf(RING_RADIUS * sinf(rad)),
+               (lv_coord_t)lroundf(-RING_RADIUS * cosf(rad)));
+}
+
+static void Ring_Frame(lv_timer_t *timer)
+{
+  float coast = LV_MIN(lv_tick_elaps(ring_target_ms), RING_MAX_COAST_MS);
+  float predicted = LV_MIN(ring_target + ring_rate * coast, 1000.0f);
+  float next = ring_shown + (predicted - ring_shown) * 0.15f;   // ease in, ~100 ms time constant
+  if (next < ring_shown) next = ring_shown;                    // never run backwards mid-approach
+  if (fabsf(next - ring_shown) < 0.05f) return;                // nothing visible to redraw
+  ring_shown = next;
+  Ring_Draw(ring_shown);
+}
+
+static void Ring_Set_Target(uint16_t target)
+{
+  uint32_t gap_ms = lv_tick_elaps(ring_target_ms);
+  ring_target_ms = lv_tick_get();
+
+  // A new turn (ring goes back to empty): restart from the new value
+  if (target + 5 < ring_target) {
+    ring_target = ring_shown = target;
+    ring_rate = 0;
+    Ring_Draw(ring_shown);
+    return;
+  }
+  if (gap_ms >= 50 && gap_ms <= 3000) {
+    float measured = (target - ring_target) / gap_ms;
+    ring_rate = ring_rate == 0 ? measured : 0.5f * ring_rate + 0.5f * measured;
+  } else if (gap_ms > 3000) {
+    ring_rate = 0;
+  }
+  ring_target = target;
+}
+
 void Nav_Screen_Create(void)
 {
   lv_obj_t *scr = lv_scr_act();
@@ -59,7 +124,7 @@ void Nav_Screen_Create(void)
   lv_obj_center(ring);
   lv_arc_set_rotation(ring, 270);
   lv_arc_set_bg_angles(ring, 0, 360);
-  lv_arc_set_range(ring, 0, 1000);
+  lv_arc_set_range(ring, 0, 360);
   lv_arc_set_value(ring, 0);
   lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
   lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
@@ -106,43 +171,16 @@ void Nav_Screen_Create(void)
   lv_obj_set_style_text_color(road_label, COLOR_ROAD, 0);
   lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 343);
 
+  ring_tip = lv_obj_create(scr);
+  lv_obj_remove_style_all(ring_tip);
+  lv_obj_set_size(ring_tip, RING_WIDTH, RING_WIDTH);
+  lv_obj_set_style_radius(ring_tip, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(ring_tip, COLOR_ACCENT, 0);
+  lv_obj_set_style_bg_opa(ring_tip, LV_OPA_COVER, 0);
+  lv_obj_add_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
+  lv_timer_create(Ring_Frame, RING_FRAME_MS, NULL);
+
   Nav_Screen_Update(TURN_RIGHT, 0, 0, "");
-}
-
-static void Ring_Anim_Cb(void *obj, int32_t value)
-{
-  lv_arc_set_value((lv_obj_t *)obj, value);
-}
-
-// Updates arrive about once per GPS fix, so glide the ring to the new value over roughly
-// the time since the previous update; it then keeps moving until the next one arrives.
-static void Ring_Animate_To(uint16_t target)
-{
-  static uint16_t anim_target = 0;
-  static uint32_t last_update_ms = 0;
-
-  uint32_t gap_ms = lv_tick_elaps(last_update_ms);
-  last_update_ms = lv_tick_get();
-  if (target == anim_target) return;
-
-  lv_anim_del(ring, Ring_Anim_Cb);
-  int32_t shown = lv_arc_get_value(ring);
-  anim_target = target;
-
-  // A new turn (ring goes back to empty) or a long pause: jump instead of sweeping
-  if (target < shown || gap_ms > 3000) {
-    lv_arc_set_value(ring, target);
-    return;
-  }
-
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, ring);
-  lv_anim_set_exec_cb(&a, Ring_Anim_Cb);
-  lv_anim_set_values(&a, shown, target);
-  lv_anim_set_time(&a, LV_CLAMP(100, gap_ms, 1500));
-  lv_anim_set_path_cb(&a, lv_anim_path_linear);
-  lv_anim_start(&a);
 }
 
 void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, const char *road)
@@ -174,7 +212,7 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
   }
   lv_label_set_text(dist_label, num);
 
-  Ring_Animate_To(progress);
+  Ring_Set_Target(progress);
   lv_label_set_text(road_label, road);
 }
 
