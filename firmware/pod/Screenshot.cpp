@@ -11,6 +11,7 @@
 #include "Pages.h"
 #include "Lean_Screen.h"
 #include "Gyro_QMI8658.h"
+#include <lvgl.h>
 
 volatile bool screenshot_sending = false;
 bool perf_report = false;
@@ -79,6 +80,13 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
       else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
       else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
+      else if (strcmp(cmd, "mem") == 0) {
+        lv_mem_monitor_t m;
+        lv_mem_monitor(&m);
+        printf("MEM lvgl total %lu, free %lu, biggest free block %lu, used %d%%, frag %d%%\r\n",
+               (unsigned long)m.total_size, (unsigned long)m.free_size, (unsigned long)m.free_biggest_size,
+               m.used_pct, m.frag_pct);
+      }
       else if (strcmp(cmd, "imu") == 0)
         printf("IMU acc %.2f %.2f %.2f g, gyro %.1f %.1f %.1f dps\r\n", Accel.x, Accel.y, Accel.z, Gyro.x, Gyro.y, Gyro.z);
       len = 0;

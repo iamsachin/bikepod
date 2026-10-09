@@ -32,12 +32,13 @@ LV_FONT_DECLARE(font_small_26);
 
 // Which sensor axis points to the right of the screen (as the rider sees it), and its sign.
 // Checked on the bench by tilting the pod (serial "imu" prints the readings).
-#define LATERAL_AXIS    { 1.0f, 0.0f, 0.0f }
+#define LATERAL_AXIS    { 0.0f, 1.0f, 0.0f }     // X turned out to run up the screen (it measured pitch)
 
 #define SAMPLE_MS       10        // 100 readings a second
 #define CAL_SAMPLES     100       // one second still at start-up
 #define MOVING_MPS      3.0f      // above this, trust speed x turn rate; below, trust gravity
-#define PULL_PER_S      1.0f      // how quickly the gyro estimate is pulled to the reference
+#define PULL_PER_S      2.0f      // how quickly the gyro estimate is pulled to the reference (drift only:
+                                  // the gyro itself follows the lean instantly)
 #define GAUGE_MAX_DEG   60.0f     // lean at each end of the top scale
 #define GAUGE_HALF_SPAN 100       // degrees of arc either side of 12 o'clock
 #define HISTORY         100       // graph points
@@ -62,6 +63,7 @@ static float max_left = 0, max_right = 0;
 static float speed_mps = 0;
 static uint32_t speed_at_ms = 0;
 static float history[HISTORY];
+static float graph_lean = 0;      // lean filtered for the graph (~0.5 s), so it draws as a smooth curve
 static uint8_t history_head = 0;
 
 // UI
@@ -118,10 +120,11 @@ static void Sample(lv_timer_t *timer)
   if (lean > max_right) max_right = lean;
   if (-lean > max_left) max_left = -lean;
 
+  graph_lean += (lean - graph_lean) * dt / 0.5f;
   static uint32_t last_history_ms = 0;
   if (lv_tick_elaps(last_history_ms) >= HISTORY_MS) {
     last_history_ms = lv_tick_get();
-    history[history_head] = lean;
+    history[history_head] = graph_lean;
     history_head = (history_head + 1) % HISTORY;
   }
 }
@@ -139,6 +142,7 @@ void Lean_Calibrate(void)
   acc_sum = gyro_sum = { 0, 0, 0 };
   max_left = max_right = 0;
   memset(history, 0, sizeof(history));
+  graph_lean = 0;
 }
 
 /*********************************** Drawing ***********************************/
@@ -194,9 +198,18 @@ static void Refresh(lv_timer_t *timer)
   snprintf(text, sizeof(text), "%d" DEGREE, (int)lroundf(max_right));
   lv_label_set_text(max_r_label, text);
 
-  // Graph: oldest on the left; 45 deg of lean = 24 px either side of the middle
+  // Graph: oldest on the left; 45 deg of lean = 24 px either side of the middle. A 5-point
+  // moving average on top of the filtered samples keeps the line a smooth curve.
   for (int i = 0; i < HISTORY; i++) {
-    float v = history[(history_head + i) % HISTORY];
+    float sum = 0;
+    int n = 0;
+    for (int k = -2; k <= 2; k++) {
+      int j = i + k;
+      if (j < 0 || j >= HISTORY) continue;
+      sum += history[(history_head + j) % HISTORY];
+      n++;
+    }
+    float v = sum / n;
     graph_pts[i].x = i * 3;
     graph_pts[i].y = (lv_coord_t)lroundf(25 - fmaxf(-45, fminf(45, v)) * 24 / 45);
   }
@@ -282,7 +295,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_line_width(mid_line, 2, 0);
   graph = lv_line_create(graph_box);
   lv_obj_set_style_line_color(graph, COLOR_BLUE, 0);
-  lv_obj_set_style_line_width(graph, 4, 0);
+  lv_obj_set_style_line_width(graph, 3, 0);
   lv_obj_set_style_line_rounded(graph, true, 0);
 
   cal_label = Label(root, &font_small_26, COLOR_DIM);
@@ -305,7 +318,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   QMI8658_Init();                     // gyro range 256 deg/s: see gyro_scale in Gyro_QMI8658.cpp
   Lean_Calibrate();
   lv_timer_create(Sample, SAMPLE_MS, NULL);
-  lv_timer_create(Refresh, 100, NULL);
+  lv_timer_create(Refresh, 33, NULL);   // ~30 updates a second
 }
 
 void Lean_Screen_Show(bool show)
