@@ -56,7 +56,11 @@ struct ContentView: View {
                     .padding(.bottom, 110)
             }
         }
-        .sheet(isPresented: $showPodTest) { PodTestView(link: link) }
+        .sheet(isPresented: $showPodTest) {
+            PodTestView(link: link)
+                .onAppear { navigator.podFeedPaused = true }
+                .onDisappear { navigator.podFeedPaused = false }
+        }
         .onChange(of: navigator.phase) { _, phase in
             if case let .preview(route) = phase {
                 camera = .boundingBox(route.mapBounds,

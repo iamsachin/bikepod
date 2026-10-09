@@ -14,20 +14,51 @@ static Nav_Message pending_msg;
 static bool msg_waiting = false;
 static volatile bool connected = false;
 
+// Returns the text between the n-th and (n+1)-th '|' (n = 0 is the first field)
+static String Field(const String &text, int n)
+{
+  int start = 0;
+  for (int i = 0; i < n; i++) {
+    start = text.indexOf('|', start) + 1;
+    if (start == 0) return "";
+  }
+  int end = text.indexOf('|', start);
+  return end < 0 ? text.substring(start) : text.substring(start, end);
+}
+
 static bool Parse_Message(const String &text, Nav_Message *msg)
 {
-  int bar1 = text.indexOf('|');
-  int bar2 = text.indexOf('|', bar1 + 1);
-  if (bar1 < 1 || bar2 < 0) return false;
+  String kind = Field(text, 0);
+  memset(msg, 0, sizeof(*msg));
 
-  switch (toupper(text[0])) {
+  if (kind == "REROUTE") {
+    msg->kind = MSG_REROUTE;
+    return true;
+  }
+  if (kind == "ARRIVED") {
+    msg->kind = MSG_ARRIVED;
+    msg->trip_km = Field(text, 1).toFloat();
+    msg->trip_min = Field(text, 2).toInt();
+    return true;
+  }
+  if (kind == "CRUISE") {
+    msg->kind = MSG_CRUISE;
+    msg->speed_kmh = Field(text, 1).toInt();
+    Field(text, 2).toCharArray(msg->clock, sizeof(msg->clock));
+    return true;
+  }
+
+  // Turn: L|400|MG Rd (the road name may itself contain '|', so take everything after the 2nd one)
+  if (kind.length() != 1 || text.indexOf('|', 2) < 0) return false;
+  switch (toupper(kind[0])) {
     case 'L': msg->dir = TURN_LEFT; break;
     case 'R': msg->dir = TURN_RIGHT; break;
     case 'S': msg->dir = TURN_STRAIGHT; break;
     default:  return false;
   }
-  msg->distance_m = text.substring(bar1 + 1, bar2).toInt();
-  text.substring(bar2 + 1).toCharArray(msg->road, sizeof(msg->road));
+  msg->kind = MSG_TURN;
+  msg->distance_m = Field(text, 1).toInt();
+  text.substring(text.indexOf('|', 2) + 1).toCharArray(msg->road, sizeof(msg->road));
   return true;
 }
 
@@ -36,10 +67,10 @@ class Nav_Write_Callbacks : public BLECharacteristicCallbacks {
     String text = characteristic->getValue();
     Nav_Message msg;
     if (!Parse_Message(text, &msg)) {
-      printf("BLE: ignored \"%s\" (expected like R|400|MG Road)\r\n", text.c_str());
+      printf("BLE: ignored \"%s\"\r\n", text.c_str());
       return;
     }
-    printf("BLE: dir=%d distance=%lu road=\"%s\"\r\n", msg.dir, (unsigned long)msg.distance_m, msg.road);
+    printf("BLE: %s\r\n", text.c_str());
     portENTER_CRITICAL(&msg_lock);
     pending_msg = msg;
     msg_waiting = true;

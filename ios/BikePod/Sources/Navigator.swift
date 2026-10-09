@@ -32,6 +32,8 @@ final class Navigator {
     /// Full Ferrostar state, for the in-app navigation map
     private(set) var navState: NavigationState?
     private(set) var isMuted = false
+    /// Stops the automatic pod updates, e.g. while the manual "Pod test" sheet is open
+    @ObservationIgnored var podFeedPaused = false
 
     var hasGPS: Bool { device.lastLocation != nil }
     var currentCoordinate: CLLocationCoordinate2D? { device.lastLocation?.clLocation.coordinate }
@@ -43,11 +45,23 @@ final class Navigator {
     private var core: FerrostarCore?
     @ObservationIgnored private var stateWatch: AnyCancellable?
     @ObservationIgnored private var lastPodMessage = ""
+    @ObservationIgnored private var lastPodSend = Date.distantPast
+    @ObservationIgnored private var turnLine = ""          // latest "R|400|MG Rd" while navigating
+    @ObservationIgnored private var tripStartedAt = Date()
+    @ObservationIgnored private var tripKm = 0.0
+    @ObservationIgnored private var podFeed: Task<Void, Never>?
     @ObservationIgnored private var routeRequestID = UUID()
 
     init(link: PodLink) {
         self.link = link
         device.startUpdating()   // also triggers the location permission prompt
+        podFeed = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.updatePod()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     private static let config = SwiftNavigationControllerConfig(
@@ -125,6 +139,9 @@ final class Navigator {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] state in self?.handle(state) }
             try core.startNavigation(route: route)
+            tripStartedAt = Date()
+            tripKm = route.distance / 1000
+            turnLine = ""
             phase = .navigating
         } catch {
             phase = .failed("Could not start navigation: \(error.localizedDescription)")
@@ -144,8 +161,9 @@ final class Navigator {
         core?.stopNavigation()
         core = nil
         navState = nil
-        lastPodMessage = ""
+        turnLine = ""
         if phase != .idle { phase = .idle }
+        updatePod()
     }
 
     private func handle(_ state: NavigationState?) {
@@ -155,7 +173,7 @@ final class Navigator {
 
         if case .complete = state.tripState {
             phase = .arrived
-            sendToPod(.straight, metres: 0, road: "Arrived")
+            updatePod()
             return
         }
         guard state.isNavigating,
@@ -167,9 +185,41 @@ final class Navigator {
         distanceToTurn = Int(progress.distanceToNextManeuver.rounded())
         remainingKm = progress.distanceRemaining / 1000
 
-        let road = rerouting ? "Rerouting..." : content.text
-        sendToPod(Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier),
-                  metres: distanceToTurn, road: road)
+        let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier)
+        turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(Self.podText(Self.shortRoadName(content.text)))"
+        updatePod()
+    }
+
+    private static let clockFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// What the pod should be showing right now (see BLE_Link.h on the pod).
+    private var podLine: String? {
+        switch phase {
+        case .navigating:
+            if rerouting { return "REROUTE" }
+            return turnLine.isEmpty ? nil : turnLine   // nil: first instruction not computed yet
+        case .arrived:
+            let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
+            return String(format: "ARRIVED|%.1f|%d", tripKm, minutes)
+        case .idle, .routing, .preview, .failed:
+            let metresPerSecond = max(0, device.lastLocation?.speed?.value ?? 0)
+            return "CRUISE|\(Int((metresPerSecond * 3.6).rounded()))|\(Self.clockFormat.string(from: Date()))"
+        }
+    }
+
+    /// Sends on every change, and repeats the same line every 2 s as a keepalive:
+    /// the pod fades its screen if it hears nothing for 8 s.
+    private func updatePod() {
+        guard !podFeedPaused,
+              let line = podLine,
+              line != lastPodMessage || Date().timeIntervalSince(lastPodSend) >= 2 else { return }
+        lastPodMessage = line
+        lastPodSend = Date()
+        link.send(line: line)
     }
 
     /// The pod only draws left / right / straight arrows for now.
@@ -185,8 +235,7 @@ final class Navigator {
 
     /// Word endings shortened the way car navigators do, so names fit the pod's two lines.
     private static let abbreviations = [
-        "Road": "Rd", "Street": "St", "Avenue": "Ave", "Main Road": "Main Rd",
-        "Cross Road": "Cross Rd", "Highway": "Hwy", "Junction": "Jn", "Nagar": "Ngr",
+        "Road": "Rd", "Street": "St", "Avenue": "Ave", "Highway": "Hwy", "Junction": "Jn", "Nagar": "Ngr",
     ]
 
     /// "Outer Ring Road; KC Reddy Ring Road" -> "Outer Ring Rd"
@@ -199,12 +248,8 @@ final class Navigator {
         return short.trimmingCharacters(in: .whitespaces)
     }
 
-    private func sendToPod(_ dir: TurnDir, metres: Int, road: String) {
-        // The pod's fonts only contain plain ASCII characters
-        let asciiRoad = String(String.UnicodeScalarView(Self.shortRoadName(road).unicodeScalars.filter { $0.isASCII }))
-        let message = "\(dir.rawValue)|\(metres)|\(asciiRoad)"
-        guard message != lastPodMessage else { return }   // GPS updates often change nothing
-        lastPodMessage = message
-        link.send(dir, metres: metres, road: asciiRoad)
+    /// The pod's fonts only contain plain ASCII characters
+    private static func podText(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.filter { $0.isASCII && $0 != "|" }))
     }
 }

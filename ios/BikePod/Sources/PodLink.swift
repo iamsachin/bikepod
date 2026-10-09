@@ -16,8 +16,8 @@ enum TurnDir: String, CaseIterable, Identifiable {
 }
 
 /// Bluetooth LE link to the handlebar pod (see firmware/pod/BLE_Link.h).
-/// The pod is a GATT server; we write one text line to its "Nav" characteristic:
-/// `<L|R|S>|<metres>|<road>`, e.g. `R|400|MG Road`.
+/// The pod is a GATT server; we write one text line to its "Nav" characteristic, e.g.
+/// `R|400|MG Rd`, `REROUTE`, `ARRIVED|7.3|29`, `CRUISE|42|21:35`.
 @Observable
 final class PodLink: NSObject {
     static let serviceUUID = CBUUID(string: "a30be272-f18f-4629-b9d2-b4dc872e5d05")
@@ -43,8 +43,13 @@ final class PodLink: NSObject {
     }
 
     func send(_ dir: TurnDir, metres: Int, road: String) {
+        send(line: "\(dir.rawValue)|\(max(0, metres))|\(road)")
+    }
+
+    /// Writes one message line (see BLE_Link.h on the pod for the formats).
+    func send(line: String) {
         guard let pod, let navChar else { return }
-        var text = "\(dir.rawValue)|\(max(0, metres))|\(road)"
+        var text = line
         // Keep the line within one BLE packet, and within the pod's 63-character road buffer
         let limit = min(pod.maximumWriteValueLength(for: .withResponse), 80)
         while text.utf8.count > limit { text.removeLast() }

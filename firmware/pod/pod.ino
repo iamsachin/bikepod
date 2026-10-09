@@ -1,7 +1,8 @@
 /*****************************************************************************
   | File        :   pod.ino
   | help        :   Bike navigation pod firmware.
-                    Step 3: shows fake turns until the phone sends real ones over BLE.
+                    Shows what the phone sends over BLE (turns, rerouting, arrived, cruise),
+                    "Waiting for phone" when disconnected, and fades the screen if the link goes quiet.
                     Display/touch drivers come from Waveshare's ESP32-S3-Touch-LCD-2.8C demo
                     (with the 18 MHz pixel clock fix in Display_ST7701.h).
 ******************************************************************************/
@@ -9,19 +10,19 @@
 #include "Nav_Screen.h"
 #include "BLE_Link.h"
 
+// The phone repeats its current message every ~2 s; after this long without one, fade the screen
+#define STALE_AFTER_MS  8000
+
 // The phone only sends the distance; the pod works out how far through the approach we are
 static uint32_t approach_start_m = 1;
 static Turn_Dir last_dir = TURN_STRAIGHT;
 static char last_road[64] = "";
+static uint32_t last_msg_ms = 0;
 
-static void Apply_Phone_Message(lv_timer_t *timer)
+static void Show_Turn(const Nav_Message &msg)
 {
-  Nav_Message msg;
-  if (!BLE_Link_Take_Message(&msg)) return;
-
-  Nav_Fake_Data_Stop();            // real data from now on
-
-  bool new_turn = msg.dir != last_dir || strcmp(msg.road, last_road) != 0
+  bool new_turn = Nav_Screen_Mode() != MODE_TURN
+                  || msg.dir != last_dir || strcmp(msg.road, last_road) != 0
                   || msg.distance_m > approach_start_m;
   if (new_turn) {
     approach_start_m = msg.distance_m > 0 ? msg.distance_m : 1;
@@ -30,6 +31,28 @@ static void Apply_Phone_Message(lv_timer_t *timer)
   }
   uint16_t progress = 1000 - msg.distance_m * 1000 / approach_start_m;
   Nav_Screen_Update(msg.dir, msg.distance_m, progress, msg.road);
+}
+
+static void Pod_Tick(lv_timer_t *timer)
+{
+  if (!BLE_Link_Connected()) {
+    if (Nav_Screen_Mode() != MODE_WAITING) Nav_Screen_Show_Waiting();
+    return;
+  }
+
+  Nav_Message msg;
+  if (BLE_Link_Take_Message(&msg)) {
+    last_msg_ms = lv_tick_get();
+    Nav_Screen_Set_Stale(false);
+    switch (msg.kind) {
+      case MSG_TURN:    Show_Turn(msg); break;
+      case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
+      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.trip_km, msg.trip_min); break;
+      case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); break;
+    }
+  } else if (Nav_Screen_Mode() != MODE_WAITING && lv_tick_elaps(last_msg_ms) > STALE_AFTER_MS) {
+    Nav_Screen_Set_Stale(true);
+  }
 }
 
 void setup()
@@ -46,10 +69,9 @@ void setup()
   Lvgl_Init();
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
-  Nav_Screen_Create();
-  Nav_Fake_Data_Start();
+  Nav_Screen_Create();              // starts on "Waiting for phone"
   BLE_Link_Init();
-  lv_timer_create(Apply_Phone_Message, 50, NULL);
+  lv_timer_create(Pod_Tick, 50, NULL);
   printf("Pod ready\r\n");
 }
 
