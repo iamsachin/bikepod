@@ -8,8 +8,8 @@ import Foundation
 /// The route itself sets the heading (not the GPS course), so it stays steady at low speed.
 enum PathShape {
     static let behindMetres = 30.0
-    static let beyondTurnMetres = 200.0   // long enough to reach the edge of the screen
-    static let maxAheadMetres = 700.0
+    static let beyondTurnMetres = 400.0   // runs off the screen and fades out (no arrowhead needed)
+    static let maxAheadMetres = 900.0
     static let maxPoints = 20          // keeps one PATH line within a single BLE packet
     static let maxStubs = 14           // keeps one STUB line within a single BLE packet
 

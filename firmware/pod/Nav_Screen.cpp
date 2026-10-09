@@ -44,6 +44,7 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define MARKER_X        (PATH_W / 2)
 #define MARKER_Y        138
 #define PATH_LINE       10
+#define CASING          3         // black outline around the route, each side
 #define PATH_MAX_POINTS 24
 #define MAX_STUBS       16
 #define STUB_METRES     22        // drawn length of a side street, in metres at the current zoom...
@@ -65,8 +66,12 @@ static lv_obj_t *road_label;
 static lv_obj_t *path_behind;
 static lv_obj_t *path_ahead;
 static lv_obj_t *path_head;
+static lv_obj_t *casing_behind;   // black outlines under the route: hide map roads peeking out
+static lv_obj_t *casing_ahead;
+static lv_obj_t *casing_head;
 static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
 static lv_obj_t *world;           // map + route + stubs: slides forward between GPS updates
+static lv_obj_t *stale_veil;      // semi-transparent black over everything when the link goes quiet
 
 static lv_obj_t *info_group;      // waiting / rerouting / arrived / cruise
 static lv_obj_t *icon_target;
@@ -111,7 +116,7 @@ static void Arrows_Init(void)
 }
 
 // Route drawing, in pixels inside the path area (after smoothing: up to 4x the points received)
-#define PATH_DRAW_MAX   (PATH_MAX_POINTS * 4)
+#define PATH_DRAW_MAX   240       // after rounding the corners (each bend becomes a short arc)
 static lv_point_t behind_pts[PATH_DRAW_MAX];
 static lv_point_t ahead_pts[PATH_DRAW_MAX];
 static lv_point_t head_pts[3];
@@ -273,13 +278,25 @@ static float path_scale = 0;      // pixels per metre
 
 static void Draw_Stubs(void);
 
+// Route lines and their casings always move and hide together
+static void Route_Line(lv_obj_t *line, lv_obj_t *casing, const lv_point_t *pts, uint16_t n)
+{
+  bool show = n >= 2;
+  if (show) {
+    lv_line_set_points(casing, pts, n);
+    lv_line_set_points(line, pts, n);
+  }
+  Show_If(casing, show);
+  Show_If(line, show);
+}
+
 static void Path_Clear(void)
 {
   stub_count = 0;
   Draw_Stubs();
-  lv_obj_add_flag(path_behind, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+  Route_Line(path_behind, casing_behind, NULL, 0);
+  Route_Line(path_ahead, casing_ahead, NULL, 0);
+  Route_Line(path_head, casing_head, NULL, 0);
 }
 
 // Douglas-Peucker in screen pixels: drops bumps smaller than ~3 px (real road jogs of a few
@@ -318,26 +335,56 @@ static uint8_t Simplify(float (*p)[2], uint8_t n, float tolerance)
   return m;
 }
 
-// Chaikin corner cutting, twice: turns OpenStreetMap's little zig-zags into smooth curves.
-// The two end points stay put, so the line still starts exactly at the rider.
-static uint8_t Smooth(const float (*in)[2], uint8_t n, lv_point_t *out)
+// Rounds every corner with a true circular arc of BEND_RADIUS px (smaller where the road pieces
+// are too short for it), sampled every few degrees, so bends look smooth whatever the map data.
+// The end points stay put, so the line still starts exactly at the rider.
+#define BEND_RADIUS     18
+#define BEND_STEP_RAD   0.15f     // ~9 degrees per sample along an arc
+
+static uint16_t Smooth(const float (*in)[2], uint8_t n, lv_point_t *out)
 {
-  static float a[PATH_DRAW_MAX][2], b[PATH_DRAW_MAX][2];
-  memcpy(a, in, n * sizeof(a[0]));
-  for (int pass = 0; pass < 2 && n >= 3 && 2 * n <= PATH_DRAW_MAX; pass++) {
-    uint8_t m = 0;
-    b[m][0] = a[0][0]; b[m][1] = a[0][1]; m++;
-    for (uint8_t i = 0; i + 1 < n; i++) {
-      float x0 = a[i][0], y0 = a[i][1], x1 = a[i + 1][0], y1 = a[i + 1][1];
-      if (i > 0)     { b[m][0] = 0.75f * x0 + 0.25f * x1; b[m][1] = 0.75f * y0 + 0.25f * y1; m++; }
-      if (i + 2 < n) { b[m][0] = 0.25f * x0 + 0.75f * x1; b[m][1] = 0.25f * y0 + 0.75f * y1; m++; }
+  uint16_t m = 0;
+  auto add = [&](float x, float y) {
+    if (m >= PATH_DRAW_MAX) return;
+    lv_point_t p = { (lv_coord_t)lroundf(x), (lv_coord_t)lroundf(y) };
+    if (m > 0 && p.x == out[m - 1].x && p.y == out[m - 1].y) return;
+    out[m++] = p;
+  };
+  if (n == 0) return 0;
+  add(in[0][0], in[0][1]);
+  for (uint8_t i = 1; i + 1 < n; i++) {
+    float bx = in[i][0], by = in[i][1];
+    float ux = in[i - 1][0] - bx, uy = in[i - 1][1] - by;   // towards the previous point
+    float vx = in[i + 1][0] - bx, vy = in[i + 1][1] - by;   // towards the next point
+    float lu = sqrtf(ux * ux + uy * uy), lv = sqrtf(vx * vx + vy * vy);
+    if (lu < 1 || lv < 1) { add(bx, by); continue; }
+    ux /= lu; uy /= lu; vx /= lv; vy /= lv;
+    float cos_angle = LV_CLAMP(-1.0f, ux * vx + uy * vy, 1.0f);
+    float angle = acosf(cos_angle);                         // between the two legs, at the corner
+    if (angle > 3.05f) { add(bx, by); continue; }           // practically straight
+    // Distance from the corner where the arc meets each leg, limited by the legs' lengths
+    float half = angle / 2;
+    float t = BEND_RADIUS / tanf(half);
+    t = LV_MIN(t, 0.45f * LV_MIN(lu, lv));
+    float r = t * tanf(half);
+    float p1x = bx + ux * t, p1y = by + uy * t;              // arc start (on the incoming leg)
+    float p2x = bx + vx * t, p2y = by + vy * t;              // arc end (on the outgoing leg)
+    float bisx = ux + vx, bisy = uy + vy, lb = sqrtf(bisx * bisx + bisy * bisy);
+    if (lb < 1e-3f || r < 0.5f) { add(bx, by); continue; }
+    float d = r / sinf(half);
+    float ox = bx + bisx / lb * d, oy = by + bisy / lb * d;  // arc centre
+    float a1 = atan2f(p1y - oy, p1x - ox), a2 = atan2f(p2y - oy, p2x - ox);
+    float sweep = a2 - a1;
+    while (sweep > (float)M_PI) sweep -= 2 * (float)M_PI;   // go round the short way
+    while (sweep < -(float)M_PI) sweep += 2 * (float)M_PI;
+    int steps = LV_MAX(1, (int)ceilf(fabsf(sweep) / BEND_STEP_RAD));
+    for (int k = 0; k <= steps; k++) {
+      float a = a1 + sweep * k / steps;
+      add(ox + r * cosf(a), oy + r * sinf(a));
     }
-    b[m][0] = a[n - 1][0]; b[m][1] = a[n - 1][1]; m++;
-    memcpy(a, b, m * sizeof(a[0]));
-    n = m;
   }
-  for (uint8_t i = 0; i < n; i++) out[i] = { (lv_coord_t)lroundf(a[i][0]), (lv_coord_t)lroundf(a[i][1]) };
-  return n;
+  add(in[n - 1][0], in[n - 1][1]);
+  return m;
 }
 
 // Side streets as short dim lines from each junction, drawn under the route. They follow the
@@ -402,7 +449,8 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
   if (split == count) split = 0;
 
   static float behind_px[PATH_MAX_POINTS][2], ahead_px[PATH_MAX_POINTS][2];
-  uint8_t n_behind = 0, n_ahead = 0;
+  uint8_t n_behind = 0;
+  uint16_t n_ahead = 0;
   for (uint8_t i = 0; i < count; i++) {
     float x = MARKER_X + pts[i][0] * path_scale;
     float y = MARKER_Y - pts[i][1] * path_scale;          // +y ahead = up the screen
@@ -412,37 +460,22 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
 
   n_behind = Simplify(behind_px, n_behind, 3);
   n_ahead = Simplify(ahead_px, n_ahead, 3);
-  if (n_behind >= 2) lv_line_set_points(path_behind, behind_pts, Smooth(behind_px, n_behind, behind_pts));
-  Show_If(path_behind, n_behind >= 2);
+  Route_Line(path_behind, casing_behind, behind_pts, n_behind >= 2 ? Smooth(behind_px, n_behind, behind_pts) : 0);
   if (n_ahead < 2) {
-    lv_obj_add_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+    Route_Line(path_ahead, casing_ahead, NULL, 0);
+    Route_Line(path_head, casing_head, NULL, 0);
     return;
   }
   n_ahead = Smooth(ahead_px, n_ahead, ahead_pts);
-  lv_line_set_points(path_ahead, ahead_pts, n_ahead);
-  lv_obj_clear_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
+  Route_Line(path_ahead, casing_ahead, ahead_pts, n_ahead);
 
-  // Chevron on the far end, pointing along the end of the line
-  lv_point_t end = ahead_pts[n_ahead - 1], prev = ahead_pts[n_ahead >= 3 ? n_ahead - 3 : n_ahead - 2];
-  float dx = end.x - prev.x, dy = end.y - prev.y, len = sqrtf(dx * dx + dy * dy);
-  if (len < 1) {
-    lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-  dx /= len; dy /= len;
-  const float wing = 13, c = cosf(0.75f), s = sinf(0.75f);  // wings ~43 degrees either side
-  head_pts[0].x = (lv_coord_t)lroundf(end.x - wing * (dx * c - dy * s));
-  head_pts[0].y = (lv_coord_t)lroundf(end.y - wing * (dx * s + dy * c));
-  head_pts[1] = end;
-  head_pts[2].x = (lv_coord_t)lroundf(end.x - wing * (dx * c + dy * s));
-  head_pts[2].y = (lv_coord_t)lroundf(end.y - wing * (-dx * s + dy * c));
-  lv_line_set_points(path_head, head_pts, 3);
-  lv_obj_clear_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+  // No arrowhead: the route runs on past the turn and fades out at the screen's edge
+  Route_Line(path_head, casing_head, NULL, 0);
 }
 
-#define MARKER_W 32
-#define MARKER_H 38
+#define MARKER_W 40       // arrow is 31x37, plus room for a 2 px dark outline all round
+#define MARKER_H 46
+#define MARKER_PAD 4
 
 static void Marker_Create(lv_obj_t *parent)
 {
@@ -450,26 +483,38 @@ static void Marker_Create(lv_obj_t *parent)
   lv_obj_t *glow = Plain_Box(parent, 30, 30);
   lv_obj_set_pos(glow, MARKER_X - 15, MARKER_Y - 13);
   lv_obj_set_style_radius(glow, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(glow, COLOR_BLUE, 0);
-  lv_obj_set_style_bg_opa(glow, LV_OPA_30, 0);
+  lv_obj_set_style_bg_opa(glow, LV_OPA_TRANSP, 0);   // shadow only: a filled circle showed a hard edge
   lv_obj_set_style_shadow_color(glow, COLOR_BLUE, 0);
-  lv_obj_set_style_shadow_width(glow, 36, 0);
-  lv_obj_set_style_shadow_opa(glow, LV_OPA_50, 0);
+  lv_obj_set_style_shadow_width(glow, 40, 0);
+  lv_obj_set_style_shadow_spread(glow, 2, 0);
+  lv_obj_set_style_shadow_opa(glow, LV_OPA_60, 0);
 
-  // Navigation arrow: two triangles make the notched shape
+  // Navigation arrow: two triangles make the notched shape. A dark copy drawn shifted 2 px in
+  // every direction first gives it an outline, so it sits cleanly on top of the route line.
   static lv_color_t buf[LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(MARKER_W, MARKER_H)];
   lv_obj_t *canvas = lv_canvas_create(parent);
   lv_canvas_set_buffer(canvas, buf, MARKER_W, MARKER_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
   lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
   lv_draw_rect_dsc_t fill;
   lv_draw_rect_dsc_init(&fill);
-  fill.bg_color = COLOR_BLUE;
   fill.bg_opa = LV_OPA_COVER;
-  lv_point_t left[]  = { {16, 0}, {16, 27}, {1, 37} };
-  lv_point_t right[] = { {16, 0}, {31, 37}, {16, 27} };
-  lv_canvas_draw_polygon(canvas, left, 3, &fill);
-  lv_canvas_draw_polygon(canvas, right, 3, &fill);
-  lv_obj_set_pos(canvas, MARKER_X - MARKER_W / 2, MARKER_Y - MARKER_H / 2);
+  const lv_point_t left[]  = { {16, 0}, {16, 27}, {1, 37} };
+  const lv_point_t right[] = { {16, 0}, {31, 37}, {16, 27} };
+  auto draw = [&](int dx, int dy, lv_color_t color) {
+    lv_point_t l[3], r[3];
+    for (int i = 0; i < 3; i++) {
+      l[i] = { (lv_coord_t)(left[i].x + MARKER_PAD + dx), (lv_coord_t)(left[i].y + MARKER_PAD + dy) };
+      r[i] = { (lv_coord_t)(right[i].x + MARKER_PAD + dx), (lv_coord_t)(right[i].y + MARKER_PAD + dy) };
+    }
+    fill.bg_color = color;
+    lv_canvas_draw_polygon(canvas, l, 3, &fill);
+    lv_canvas_draw_polygon(canvas, r, 3, &fill);
+  };
+  for (int dx = -2; dx <= 2; dx += 2)
+    for (int dy = -2; dy <= 2; dy += 2)
+      if (dx || dy) draw(dx, dy, lv_color_hex(0x0A0F1A));
+  draw(0, 0, COLOR_BLUE);
+  lv_obj_set_pos(canvas, MARKER_X - 16 - MARKER_PAD, MARKER_Y - MARKER_H / 2);
 }
 
 /********************************* Screen setup *********************************/
@@ -624,6 +669,10 @@ void Nav_Screen_Create(void)
     stub_lines[i] = Line_Create(world, STUB_LINE, COLOR_STUB, LV_OPA_COVER);
     lv_obj_add_flag(stub_lines[i], LV_OBJ_FLAG_HIDDEN);
   }
+  // Black casing under the route, so the map road beneath never shows as a grey fringe
+  casing_behind = Line_Create(world, PATH_LINE - 2 + 2 * CASING, lv_color_black(), LV_OPA_COVER);
+  casing_ahead = Line_Create(world, PATH_LINE + 2 * CASING, lv_color_black(), LV_OPA_COVER);
+  casing_head = Line_Create(world, PATH_LINE - 3 + 2 * CASING, lv_color_black(), LV_OPA_COVER);
   // Solid colours: see-through segments overlap at every joint and look blotchy
   path_behind = Line_Create(world, PATH_LINE - 2, COLOR_PATH_DONE, LV_OPA_COVER);
   path_ahead = Line_Create(world, PATH_LINE, COLOR_PATH, LV_OPA_COVER);
@@ -676,6 +725,11 @@ void Nav_Screen_Create(void)
   lv_obj_move_foreground(ring);
   lv_obj_move_foreground(ring_tip);
   lv_obj_move_foreground(spinner);
+
+  stale_veil = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_color(stale_veil, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(stale_veil, LV_OPA_60, 0);
+  lv_obj_add_flag(stale_veil, LV_OBJ_FLAG_HIDDEN);
 
   Nav_Screen_Show_Waiting();
 }
@@ -737,12 +791,9 @@ void Nav_Screen_Set_Stale(bool now_stale)
 {
   if (now_stale == stale) return;
   stale = now_stale;
-  lv_opa_t opa = stale ? LV_OPA_40 : LV_OPA_COVER;
-  lv_obj_set_style_opa(turn_group, opa, 0);
-  lv_obj_set_style_opa(info_group, opa, 0);
-  lv_obj_set_style_opa(eta_label, opa, 0);
-  lv_obj_set_style_opa(ring, opa, 0);
-  lv_obj_set_style_opa(ring_tip, opa, 0);
+  // A plain veil: setting opacity on whole groups made LVGL render them through a layer,
+  // which broke with the map's draw callback
+  Show_If(stale_veil, stale);
 }
 
 void Nav_Screen_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
