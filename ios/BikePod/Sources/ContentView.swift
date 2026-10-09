@@ -17,6 +17,7 @@ struct ContentView: View {
     private static let mapStyle = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
 
     @State private var search = PlaceSearch()
+    @State private var recents = RecentPlaces()
     @State private var query = ""
     @State private var camera: MapViewCamera = .trackUserLocation(zoom: 14)
     @State private var simulate = true
@@ -96,26 +97,9 @@ struct ContentView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
 
             if searchFocused, !search.results.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(search.results) { place in
-                            Button { choose(place) } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(place.name).foregroundStyle(.primary)
-                                    if !place.detail.isEmpty {
-                                        Text(place.detail).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 12)
-                            }
-                            Divider()
-                        }
-                    }
-                }
-                .frame(maxHeight: 320)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                placeList(search.results, icon: "mappin.circle")
+            } else if searchFocused, query.isEmpty, !recents.places.isEmpty {
+                placeList(recents.places, icon: "clock.arrow.circlepath", title: "Recent")
             }
             if let error = search.error {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -124,6 +108,42 @@ struct ContentView: View {
         .onChange(of: query) { _, text in
             search.search(text, near: navigator.currentCoordinate)
         }
+    }
+
+    private func placeList(_ places: [Place], icon: String, title: String? = nil) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let title {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.top, 10)
+                }
+                ForEach(places) { place in
+                    HStack(spacing: 10) {
+                        Image(systemName: icon).foregroundStyle(.secondary)
+                        Button { choose(place) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(place.name).foregroundStyle(.primary)
+                                if !place.detail.isEmpty {
+                                    Text(place.detail).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if title != nil {   // recents can be removed one by one
+                            Button { recents.forget(place) } label: {
+                                Image(systemName: "xmark").font(.caption).foregroundStyle(.tertiary)
+                            }
+                            .accessibilityLabel("Remove \(place.name)")
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    Divider()
+                }
+            }
+        }
+        .frame(maxHeight: 320)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: Route preview / status
@@ -195,6 +215,7 @@ struct ContentView: View {
     // MARK: Actions
 
     private func choose(_ place: Place) {
+        recents.remember(place)
         searchFocused = false
         query = place.name
         search.clear()

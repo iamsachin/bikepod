@@ -65,8 +65,8 @@ static uint8_t Parse_Path(const String &list, int16_t (*pts)[2])
   return count;
 }
 
-// "x,y,a;x,y,a;..." -> stubs
-static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[3])
+// "x,y,a[,t];..." -> stubs
+static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[4])
 {
   uint8_t count = 0;
   int pos = 0;
@@ -76,9 +76,12 @@ static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[3])
     int c1 = list.indexOf(',', pos);
     int c2 = c1 < 0 ? -1 : list.indexOf(',', c1 + 1);
     if (c1 > pos && c2 > c1 && c2 < semi) {
+      int c3 = list.indexOf(',', c2 + 1);
+      bool flagged = c3 > c2 && c3 < semi;
       stubs[count][0] = list.substring(pos, c1).toInt();
       stubs[count][1] = list.substring(c1 + 1, c2).toInt();
-      stubs[count][2] = list.substring(c2 + 1, semi).toInt();
+      stubs[count][2] = list.substring(c2 + 1, flagged ? c3 : semi).toInt();
+      stubs[count][3] = flagged ? list.substring(c3 + 1, semi).toInt() : 0;
       count++;
     }
     pos = semi + 1;

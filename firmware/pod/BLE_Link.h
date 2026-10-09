@@ -8,8 +8,9 @@
 //   TRIP|18:42|6.0            arrival time and kilometres left
 //   PATH|-2,-30;0,0;3,85;...  route around the rider in metres, heading-up (+x right, +y ahead),
 //                             the rider is the 0,0 point
-//   STUB|40,85,270;...        side streets: junction x,y (metres, same frame as PATH) and the
-//                             street's direction in degrees clockwise from straight ahead
+//   STUB|40,85,270,1;...      side streets: junction x,y (metres, same frame as PATH), the
+//                             street's direction in degrees clockwise from straight ahead, and
+//                             optionally ",1" when the junction is the turn (drawn long)
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -41,7 +42,7 @@ struct Nav_Message {
   int16_t path[NAV_PATH_MAX_POINTS][2];
   // MSG_STUB
   uint8_t stub_count;
-  int16_t stubs[NAV_MAX_STUBS][3];
+  int16_t stubs[NAV_MAX_STUBS][4];        // x, y, angle, at-turn flag
 };
 
 void BLE_Link_Init(void);

@@ -217,7 +217,8 @@ final class Navigator {
                                          junctions: junctions) {
             pathAlong = result.along
             pathLine = "PATH|" + result.shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
-            stubLine = "STUB|" + result.stubs.map { "\($0.x),\($0.y),\($0.angle)" }.joined(separator: ";")
+            stubLine = "STUB|" + result.stubs.map { "\($0.x),\($0.y),\($0.angle)" + ($0.atTurn ? ",1" : "") }
+                .joined(separator: ";")
         }
         updatePod()
     }

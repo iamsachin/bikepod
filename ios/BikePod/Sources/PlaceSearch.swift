@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 import Observation
 
-struct Place: Identifiable, Hashable {
+struct Place: Identifiable, Hashable, Codable {
     let id: String
     let name: String
     let detail: String
@@ -11,6 +11,36 @@ struct Place: Identifiable, Hashable {
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+/// Places picked from search, newest first, kept on the phone between launches.
+@MainActor
+@Observable
+final class RecentPlaces {
+    private static let key = "recentPlaces"
+    private static let limit = 8
+    private(set) var places: [Place]
+
+    init() {
+        let data = UserDefaults.standard.data(forKey: Self.key)
+        places = data.flatMap { try? JSONDecoder().decode([Place].self, from: $0) } ?? []
+    }
+
+    func remember(_ place: Place) {
+        places.removeAll { $0.id == place.id || ($0.name == place.name && $0.detail == place.detail) }
+        places.insert(place, at: 0)
+        places = Array(places.prefix(Self.limit))
+        save()
+    }
+
+    func forget(_ place: Place) {
+        places.removeAll { $0.id == place.id }
+        save()
+    }
+
+    private func save() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(places), forKey: Self.key)
     }
 }
 

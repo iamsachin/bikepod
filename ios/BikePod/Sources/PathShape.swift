@@ -8,14 +8,15 @@ import Foundation
 /// The route itself sets the heading (not the GPS course), so it stays steady at low speed.
 enum PathShape {
     static let behindMetres = 30.0
-    static let beyondTurnMetres = 80.0
+    static let beyondTurnMetres = 200.0   // long enough to reach the edge of the screen
     static let maxAheadMetres = 700.0
     static let maxPoints = 20          // keeps one PATH line within a single BLE packet
     static let maxStubs = 14           // keeps one STUB line within a single BLE packet
 
-    /// A side street to draw: where it leaves the route (metres, same frame as the shape)
-    /// and its direction in degrees clockwise from straight ahead.
-    typealias Stub = (x: Int, y: Int, angle: Int)
+    /// A side street to draw: where it leaves the route (metres, same frame as the shape),
+    /// its direction in degrees clockwise from straight ahead, and whether it is at the turn
+    /// (drawn long, across the screen, like the road being turned onto).
+    typealias Stub = (x: Int, y: Int, angle: Int, atTurn: Bool)
 
     /// - Parameter previousAlong: where the rider was along the route last time (metres from the
     ///   start). Routes can double back on themselves (U-turns on divided roads), so the nearest
@@ -101,10 +102,12 @@ enum PathShape {
             let s = along[junction.geometryIndex]
             guard s >= start, s <= end else { continue }
             let p = local(pts[junction.geometryIndex])
+            let atTurn = abs(s - (s0 + metresToTurn)) < 15
             for bearing in junction.sideBearings {
                 let angle = (bearing - headingDegrees).truncatingRemainder(dividingBy: 360)
-                stubs.append((abs(s - s0), (Int(p.x.rounded()), Int(p.y.rounded()),
-                                            Int((angle < 0 ? angle + 360 : angle).rounded()) % 360)))
+                stubs.append((atTurn ? -1 : abs(s - s0),     // the turn's streets first
+                              (Int(p.x.rounded()), Int(p.y.rounded()),
+                               Int((angle < 0 ? angle + 360 : angle).rounded()) % 360, atTurn)))
             }
         }
         stubs.sort { $0.distance < $1.distance }
