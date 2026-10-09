@@ -1,7 +1,7 @@
 /*****************************************************************************
   | File        :   pod.ino
   | help        :   Bike navigation pod firmware.
-                    Shows what the phone sends over BLE (turns, rerouting, arrived, cruise),
+                    Shows what the phone sends over BLE (turns + route drawing, rerouting, arrived, cruise),
                     "Waiting for phone" when disconnected, and fades the screen if the link goes quiet.
                     Display/touch drivers come from Waveshare's ESP32-S3-Touch-LCD-2.8C demo
                     (with the 18 MHz pixel clock fix in Display_ST7701.h).
@@ -22,15 +22,15 @@ static uint32_t last_msg_ms = 0;
 static void Show_Turn(const Nav_Message &msg)
 {
   bool new_turn = Nav_Screen_Mode() != MODE_TURN
-                  || msg.dir != last_dir || strcmp(msg.road, last_road) != 0
+                  || msg.dir != last_dir || strcmp(msg.text, last_road) != 0
                   || msg.distance_m > approach_start_m;
   if (new_turn) {
     approach_start_m = msg.distance_m > 0 ? msg.distance_m : 1;
     last_dir = msg.dir;
-    strlcpy(last_road, msg.road, sizeof(last_road));
+    strlcpy(last_road, msg.text, sizeof(last_road));
   }
   uint16_t progress = 1000 - msg.distance_m * 1000 / approach_start_m;
-  Nav_Screen_Update(msg.dir, msg.distance_m, progress, msg.road);
+  Nav_Screen_Update(msg.dir, msg.distance_m, progress, msg.text);
 }
 
 static void Pod_Tick(lv_timer_t *timer)
@@ -41,15 +41,21 @@ static void Pod_Tick(lv_timer_t *timer)
   }
 
   Nav_Message msg;
-  if (BLE_Link_Take_Message(&msg)) {
-    last_msg_ms = lv_tick_get();
-    Nav_Screen_Set_Stale(false);
+  bool got_any = false;
+  while (BLE_Link_Take_Message(&msg)) {
+    got_any = true;
     switch (msg.kind) {
       case MSG_TURN:    Show_Turn(msg); break;
+      case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
+      case MSG_PATH:    Nav_Screen_Set_Path(msg.path, msg.path_count); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
-      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.trip_km, msg.trip_min); break;
+      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); break;
       case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); break;
     }
+  }
+  if (got_any) {
+    last_msg_ms = lv_tick_get();
+    Nav_Screen_Set_Stale(false);
   } else if (Nav_Screen_Mode() != MODE_WAITING && lv_tick_elaps(last_msg_ms) > STALE_AFTER_MS) {
     Nav_Screen_Set_Stale(true);
   }

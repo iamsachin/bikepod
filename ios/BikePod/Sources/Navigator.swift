@@ -44,9 +44,11 @@ final class Navigator {
     private let simulated = SimulatedLocationProvider()
     private var core: FerrostarCore?
     @ObservationIgnored private var stateWatch: AnyCancellable?
-    @ObservationIgnored private var lastPodMessage = ""
-    @ObservationIgnored private var lastPodSend = Date.distantPast
+    /// Last line sent per kind ("turn", "path", ...) and when, for change detection and keepalive
+    @ObservationIgnored private var lastPodSent: [String: (line: String, at: Date)] = [:]
     @ObservationIgnored private var turnLine = ""          // latest "R|400|MG Rd" while navigating
+    @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
+    @ObservationIgnored private var pathLine = ""          // latest "PATH|..." route drawing
     @ObservationIgnored private var tripStartedAt = Date()
     @ObservationIgnored private var tripKm = 0.0
     @ObservationIgnored private var podFeed: Task<Void, Never>?
@@ -142,6 +144,8 @@ final class Navigator {
             tripStartedAt = Date()
             tripKm = route.distance / 1000
             turnLine = ""
+            tripLine = ""
+            pathLine = ""
             phase = .navigating
         } catch {
             phase = .failed("Could not start navigation: \(error.localizedDescription)")
@@ -162,6 +166,8 @@ final class Navigator {
         core = nil
         navState = nil
         turnLine = ""
+        tripLine = ""
+        pathLine = ""
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -187,6 +193,15 @@ final class Navigator {
 
         let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier)
         turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(Self.podText(Self.shortRoadName(content.text)))"
+
+        let eta = Date().addingTimeInterval(progress.durationRemaining)
+        tripLine = String(format: "TRIP|%@|%.1f", Self.clockFormat.string(from: eta), remainingKm)
+
+        if let rider = state.preferredUserLocation?.coordinates,
+           let shape = PathShape.around(rider: rider, route: state.routeGeometry,
+                                        metresToTurn: progress.distanceToNextManeuver) {
+            pathLine = "PATH|" + shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
+        }
         updatePod()
     }
 
@@ -196,30 +211,39 @@ final class Navigator {
         return f
     }()
 
-    /// What the pod should be showing right now (see BLE_Link.h on the pod).
-    private var podLine: String? {
+    /// What the pod should be showing right now, as (kind, line) pairs (see BLE_Link.h on the pod).
+    private var podLines: [(kind: String, line: String)] {
         switch phase {
         case .navigating:
-            if rerouting { return "REROUTE" }
-            return turnLine.isEmpty ? nil : turnLine   // nil: first instruction not computed yet
+            if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
+            guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
+            // Turn first: the pod sizes the route drawing from the turn distance
+            return [("turn", turnLine), ("path", pathLine), ("trip", tripLine)].filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
-            return String(format: "ARRIVED|%.1f|%d", tripKm, minutes)
+            let place = Self.podText(destinationName)
+            return [("state", String(format: "ARRIVED|%.1f|%d|", tripKm, minutes) + place)]
         case .idle, .routing, .preview, .failed:
             let metresPerSecond = max(0, device.lastLocation?.speed?.value ?? 0)
-            return "CRUISE|\(Int((metresPerSecond * 3.6).rounded()))|\(Self.clockFormat.string(from: Date()))"
+            let speed = Int((metresPerSecond * 3.6).rounded())
+            return [("state", "CRUISE|\(speed)|\(Self.clockFormat.string(from: Date()))")]
         }
     }
 
-    /// Sends on every change, and repeats the same line every 2 s as a keepalive:
+    /// Sends each line when it changes, and repeats it every 2 s as a keepalive:
     /// the pod fades its screen if it hears nothing for 8 s.
+    /// Route drawings go at most 4 times a second so a fast simulation can't flood the link.
     private func updatePod() {
-        guard !podFeedPaused,
-              let line = podLine,
-              line != lastPodMessage || Date().timeIntervalSince(lastPodSend) >= 2 else { return }
-        lastPodMessage = line
-        lastPodSend = Date()
-        link.send(line: line)
+        guard !podFeedPaused else { return }
+        let now = Date()
+        for (kind, line) in podLines {
+            let last = lastPodSent[kind]
+            let age = now.timeIntervalSince(last?.at ?? .distantPast)
+            let changed = line != last?.line
+            guard (changed && (kind != "path" || age >= 0.25)) || age >= 2 else { continue }
+            lastPodSent[kind] = (line, now)
+            link.send(line: line)
+        }
     }
 
     /// The pod only draws left / right / straight arrows for now.

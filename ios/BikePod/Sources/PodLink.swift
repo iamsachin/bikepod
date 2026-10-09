@@ -50,8 +50,8 @@ final class PodLink: NSObject {
     func send(line: String) {
         guard let pod, let navChar else { return }
         var text = line
-        // Keep the line within one BLE packet, and within the pod's 63-character road buffer
-        let limit = min(pod.maximumWriteValueLength(for: .withResponse), 80)
+        // The pod asks for a large MTU, so a whole PATH line fits; never exceed what iOS allows
+        let limit = min(pod.maximumWriteValueLength(for: .withResponse), 240)
         while text.utf8.count > limit { text.removeLast() }
         pod.writeValue(Data(text.utf8), for: navChar, type: .withResponse)
         lastSent = text

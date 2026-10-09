@@ -1,58 +1,117 @@
 /*****************************************************************************
   | File        :   Nav_Screen.cpp
-  | help        :   Screens for the 480x480 round display: approaching turn, waiting for phone,
-                    rerouting, arrived, cruise. Black background, white text, one accent colour.
+  | help        :   Screens for the 480x480 round display: approaching turn (with a heading-up
+                    drawing of the route ahead), waiting for phone, rerouting, arrived, cruise.
+                    Black background, white text, one blue accent; amber for rerouting.
 ******************************************************************************/
 #include "Nav_Screen.h"
 #include <stdio.h>
 #include <math.h>
 
-LV_FONT_DECLARE(font_dist_132);   // Inter Display Bold, digits and "." only
-LV_FONT_DECLARE(font_unit_44);    // Inter SemiBold, ASCII
-LV_FONT_DECLARE(font_road_30);    // Inter Medium, ASCII
+LV_FONT_DECLARE(font_big_104);    // Barlow Bold, digits and "." only
+LV_FONT_DECLARE(font_title_44);   // Barlow SemiBold, ASCII + middle dot
+LV_FONT_DECLARE(font_text_32);    // Barlow SemiBold, ASCII + middle dot
+LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 
-#define COLOR_ACCENT    lv_color_hex(0x00D1FF)
-#define COLOR_RING_BG   lv_color_hex(0x1C1C1C)
+#define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_TEXT      lv_color_hex(0xFFFFFF)
-#define COLOR_UNIT      lv_color_hex(0x9A9A9A)
-#define COLOR_ROAD      lv_color_hex(0xC8C8C8)
-#define COLOR_AMBER     lv_color_hex(0xFFB000)
+#define COLOR_SOFT      lv_color_hex(0xE6E6E6)   // ETA line, route path
+#define COLOR_GREY      lv_color_hex(0xA8A8A8)   // road name, units
+#define COLOR_AMBER     lv_color_hex(0xF5B83D)
+#define COLOR_RED       lv_color_hex(0xE5484D)
 
-#define RING_SIZE       468
-#define RING_WIDTH      14
-#define ARROW_BOX       150
-#define ARROW_WIDTH     22
-#define ROAD_LINE_SPACE (-4)
+#define MIDDLE_DOT      "\xC2\xB7"
+
+#define RING_SIZE       462
+#define RING_WIDTH      8
+
+// Header arrow: drawn in a 70x76 box with rounded strokes
+#define HEAD_ARROW_W    70
+#define HEAD_ARROW_H    76
+#define HEAD_ARROW_LINE 11
+
+// Route drawing area (screen coordinates) and where the rider's marker sits inside it
+#define PATH_X          40
+#define PATH_Y          212
+#define PATH_W          400
+#define PATH_H          162
+#define MARKER_X        (PATH_W / 2)
+#define MARKER_Y        108
+#define PATH_LINE       16
+#define PATH_MAX_POINTS 24
 
 static lv_obj_t *ring;
-static lv_obj_t *arrow_stem;
-static lv_obj_t *arrow_head;
+static lv_obj_t *turn_group;      // header + road + route drawing
+static lv_obj_t *head_stem;
+static lv_obj_t *head_tip;
 static lv_obj_t *dist_label;
 static lv_obj_t *unit_label;
 static lv_obj_t *road_label;
-static lv_obj_t *turn_group;      // arrow + distance + road
+static lv_obj_t *path_behind;
+static lv_obj_t *path_ahead;
+static lv_obj_t *path_head;
+static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
+
 static lv_obj_t *info_group;      // waiting / rerouting / arrived / cruise
+static lv_obj_t *icon_target;
+static lv_obj_t *icon_reroute;
 static lv_obj_t *info_top;
 static lv_obj_t *info_main;
-static lv_obj_t *info_bottom;
+static lv_obj_t *info_sub;
+static lv_obj_t *info_detail;
+static lv_obj_t *spinner;         // amber arc running round the edge while rerouting
+static lv_timer_t *spinner_timer;
+
 static Screen_Mode mode = MODE_WAITING;
 static bool stale = false;
+static bool have_trip = false;
+static uint32_t turn_distance_m = 0;
 
-// Arrow shapes inside a 150x150 box: a stem with a bevelled bend, plus a chevron head
-static lv_point_t right_stem[] = { {45, 140}, {45, 80}, {75, 50}, {125, 50} };
-static lv_point_t right_head[] = { {97, 22}, {125, 50}, {97, 78} };
-static lv_point_t left_stem[]  = { {105, 140}, {105, 80}, {75, 50}, {25, 50} };
-static lv_point_t left_head[]  = { {53, 22}, {25, 50}, {53, 78} };
-static lv_point_t ahead_stem[] = { {75, 140}, {75, 20} };
-static lv_point_t ahead_head[] = { {45, 50}, {75, 20}, {105, 50} };
+// Header arrow shapes (70x76 box)
+static lv_point_t right_stem[] = { {16, 70}, {16, 34}, {28, 22}, {56, 22} };
+static lv_point_t right_tip[]  = { {42, 8}, {56, 22}, {42, 36} };
+static lv_point_t left_stem[]  = { {54, 70}, {54, 34}, {42, 22}, {14, 22} };
+static lv_point_t left_tip[]   = { {28, 8}, {14, 22}, {28, 36} };
+static lv_point_t ahead_stem[] = { {35, 70}, {35, 10} };
+static lv_point_t ahead_tip[]  = { {21, 24}, {35, 10}, {49, 24} };
 
-static lv_obj_t *Arrow_Line_Create(lv_obj_t *parent)
+// Route drawing, in pixels inside the path area
+static lv_point_t behind_pts[PATH_MAX_POINTS];
+static lv_point_t ahead_pts[PATH_MAX_POINTS];
+static lv_point_t head_pts[3];
+
+static lv_obj_t *Line_Create(lv_obj_t *parent, lv_coord_t width, lv_color_t color, lv_opa_t opa)
 {
   lv_obj_t *line = lv_line_create(parent);
-  lv_obj_set_style_line_width(line, ARROW_WIDTH, 0);
-  lv_obj_set_style_line_color(line, COLOR_ACCENT, 0);
+  lv_obj_set_style_line_width(line, width, 0);
+  lv_obj_set_style_line_color(line, color, 0);
+  lv_obj_set_style_line_opa(line, opa, 0);
   lv_obj_set_style_line_rounded(line, true, 0);
   return line;
+}
+
+static lv_obj_t *Plain_Box(lv_obj_t *parent, lv_coord_t w, lv_coord_t h)
+{
+  lv_obj_t *box = lv_obj_create(parent);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, w, h);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  return box;
+}
+
+static lv_obj_t *Label_Create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color)
+{
+  lv_obj_t *label = lv_label_create(parent);
+  lv_obj_set_style_text_font(label, font, 0);
+  lv_obj_set_style_text_color(label, color, 0);
+  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+  return label;
+}
+
+static void Show_If(lv_obj_t *obj, bool show)
+{
+  if (show) lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 
 /******************************** Smooth progress ring ********************************
@@ -119,59 +178,193 @@ static void Ring_Set_Target(uint16_t target)
   ring_target = target;
 }
 
-// For the non-turn screens: a still ring (0 = empty, 1000 = full) in the given colour
-static void Ring_Set_Fixed(uint16_t value, lv_color_t color)
+// For the non-turn screens: a still ring (0 = empty, 1000 = full)
+static void Ring_Set_Fixed(uint16_t value)
 {
-  lv_obj_set_style_arc_color(ring, color, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_color(ring_tip, color, 0);
   ring_target = ring_shown = value;
   ring_rate = 0;
   Ring_Draw(ring_shown);
 }
 
-static lv_obj_t *Full_Screen_Group(lv_obj_t *parent)
+/********************************* Rerouting spinner *********************************/
+static void Spinner_Tick(lv_timer_t *timer)
 {
-  lv_obj_t *group = lv_obj_create(parent);
-  lv_obj_remove_style_all(group);
-  lv_obj_set_size(group, LV_PCT(100), LV_PCT(100));
-  lv_obj_clear_flag(group, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-  return group;
+  static int16_t start = 0;
+  start = (start + 8) % 360;                  // one turn every ~1.4 s
+  lv_arc_set_angles(spinner, start, start + 70);
 }
 
-static lv_obj_t *Info_Label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color)
+/************************************* Icons *************************************/
+static void Icons_Create(lv_obj_t *parent)
 {
-  lv_obj_t *label = lv_label_create(parent);
-  lv_obj_set_style_text_font(label, font, 0);
-  lv_obj_set_style_text_color(label, color, 0);
-  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-  return label;
+  // Arrived: a red target
+  icon_target = Plain_Box(parent, 52, 60);
+  lv_obj_t *outer = Plain_Box(icon_target, 48, 48);
+  lv_obj_align(outer, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_radius(outer, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_border_width(outer, 7, 0);
+  lv_obj_set_style_border_color(outer, COLOR_RED, 0);
+  lv_obj_t *dot = Plain_Box(icon_target, 16, 16);
+  lv_obj_align(dot, LV_ALIGN_TOP_MID, 0, 16);
+  lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(dot, COLOR_RED, 0);
+  lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+
+  // Rerouting: a circular arrow
+  icon_reroute = Plain_Box(parent, 64, 72);
+  lv_obj_t *loop = lv_arc_create(icon_reroute);
+  lv_obj_set_size(loop, 56, 56);
+  lv_obj_align(loop, LV_ALIGN_TOP_MID, 0, 6);
+  lv_obj_remove_style(loop, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(loop, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(loop, 0, 0);
+  lv_obj_set_style_arc_opa(loop, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(loop, 7, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(loop, COLOR_AMBER, LV_PART_INDICATOR);
+  lv_arc_set_bg_angles(loop, 0, 360);
+  lv_arc_set_angles(loop, 300, 240);          // open gap at the top-right
+  static lv_point_t tip[] = { {33, 0}, {44, 9}, {32, 18} };
+  lv_obj_t *tip_line = Line_Create(icon_reroute, 7, COLOR_AMBER, LV_OPA_COVER);
+  lv_line_set_points(tip_line, tip, 3);
 }
 
+/******************************* Route drawing *******************************/
+static float path_scale = 0;      // pixels per metre
+
+static void Path_Clear(void)
+{
+  lv_obj_add_flag(path_behind, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
+{
+  if (count > PATH_MAX_POINTS) count = PATH_MAX_POINTS;
+
+  // Zoom so the turn sits about 100 px ahead of the rider; ease zoom changes between updates
+  float target = 100.0f / LV_MAX((float)turn_distance_m, 35.0f);
+  target = LV_CLAMP(0.3f, target, 2.6f);
+  path_scale = path_scale == 0 ? target : path_scale * 0.6f + target * 0.4f;
+
+  // The rider's position is the (0,0) point: before it is ridden, after it is ahead
+  uint8_t split = 0;
+  while (split < count && !(pts[split][0] == 0 && pts[split][1] == 0)) split++;
+  if (split == count) split = 0;
+
+  uint8_t n_behind = 0, n_ahead = 0;
+  for (uint8_t i = 0; i < count; i++) {
+    lv_point_t p = { (lv_coord_t)lroundf(MARKER_X + pts[i][0] * path_scale),
+                     (lv_coord_t)lroundf(MARKER_Y - pts[i][1] * path_scale) };   // +y ahead = up
+    if (i <= split) behind_pts[n_behind++] = p;
+    if (i >= split) ahead_pts[n_ahead++] = p;
+  }
+
+  if (n_behind >= 2) lv_line_set_points(path_behind, behind_pts, n_behind);
+  Show_If(path_behind, n_behind >= 2);
+  if (n_ahead < 2) {
+    lv_obj_add_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_line_set_points(path_ahead, ahead_pts, n_ahead);
+  lv_obj_clear_flag(path_ahead, LV_OBJ_FLAG_HIDDEN);
+
+  // Chevron on the far end, pointing along the last segment
+  lv_point_t end = ahead_pts[n_ahead - 1], prev = ahead_pts[n_ahead - 2];
+  float dx = end.x - prev.x, dy = end.y - prev.y, len = sqrtf(dx * dx + dy * dy);
+  if (len < 1) {
+    lv_obj_add_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  dx /= len; dy /= len;
+  const float wing = 20, c = cosf(0.7f), s = sinf(0.7f);    // wings ~40 degrees either side
+  head_pts[0].x = (lv_coord_t)lroundf(end.x - wing * (dx * c - dy * s));
+  head_pts[0].y = (lv_coord_t)lroundf(end.y - wing * (dx * s + dy * c));
+  head_pts[1] = end;
+  head_pts[2].x = (lv_coord_t)lroundf(end.x - wing * (dx * c + dy * s));
+  head_pts[2].y = (lv_coord_t)lroundf(end.y - wing * (-dx * s + dy * c));
+  lv_line_set_points(path_head, head_pts, 3);
+  lv_obj_clear_flag(path_head, LV_OBJ_FLAG_HIDDEN);
+}
+
+#define MARKER_W 32
+#define MARKER_H 38
+
+static void Marker_Create(lv_obj_t *parent)
+{
+  // Soft blue glow under the marker
+  lv_obj_t *glow = Plain_Box(parent, 30, 30);
+  lv_obj_set_pos(glow, MARKER_X - 15, MARKER_Y - 13);
+  lv_obj_set_style_radius(glow, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(glow, COLOR_BLUE, 0);
+  lv_obj_set_style_bg_opa(glow, LV_OPA_30, 0);
+  lv_obj_set_style_shadow_color(glow, COLOR_BLUE, 0);
+  lv_obj_set_style_shadow_width(glow, 36, 0);
+  lv_obj_set_style_shadow_opa(glow, LV_OPA_50, 0);
+
+  // Navigation arrow: two triangles make the notched shape
+  static lv_color_t buf[LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(MARKER_W, MARKER_H)];
+  lv_obj_t *canvas = lv_canvas_create(parent);
+  lv_canvas_set_buffer(canvas, buf, MARKER_W, MARKER_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
+  lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
+  lv_draw_rect_dsc_t fill;
+  lv_draw_rect_dsc_init(&fill);
+  fill.bg_color = COLOR_BLUE;
+  fill.bg_opa = LV_OPA_COVER;
+  lv_point_t left[]  = { {16, 0}, {16, 27}, {1, 37} };
+  lv_point_t right[] = { {16, 0}, {31, 37}, {16, 27} };
+  lv_canvas_draw_polygon(canvas, left, 3, &fill);
+  lv_canvas_draw_polygon(canvas, right, 3, &fill);
+  lv_obj_set_pos(canvas, MARKER_X - MARKER_W / 2, MARKER_Y - MARKER_H / 2);
+}
+
+/********************************* Screen setup *********************************/
 static void Set_Mode(Screen_Mode new_mode)
 {
   mode = new_mode;
-  if (mode == MODE_TURN) {
-    lv_obj_clear_flag(turn_group, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(info_group, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(turn_group, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(info_group, LV_OBJ_FLAG_HIDDEN);
-  }
+  Show_If(turn_group, mode == MODE_TURN);
+  Show_If(info_group, mode != MODE_TURN);
+
+  bool rerouting = mode == MODE_REROUTING;
+  Show_If(spinner, rerouting);
+  Show_If(ring, !rerouting);
+  if (rerouting) lv_timer_resume(spinner_timer);
+  else lv_timer_pause(spinner_timer);
+
+  Show_If(eta_label, have_trip && (mode == MODE_TURN || rerouting));
 }
 
-static void Set_Info(const char *top, const char *main, const lv_font_t *main_font,
-                     lv_color_t main_color, const char *bottom)
+// Info screens: optional icon, then up to four centred lines. Empty lines are hidden so the
+// rest stays centred.
+static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv_font_t *main_font,
+                     const char *sub, const char *detail)
 {
+  Show_If(icon_target, icon == icon_target);
+  Show_If(icon_reroute, icon == icon_reroute);
   lv_label_set_text(info_top, top);
   lv_label_set_text(info_main, main);
   lv_obj_set_style_text_font(info_main, main_font, 0);
-  lv_obj_set_style_text_color(info_main, main_color, 0);
-  lv_label_set_text(info_bottom, bottom);
-  // Empty labels would still take up a line and push the main text off centre
-  lv_obj_add_flag(info_top, LV_OBJ_FLAG_HIDDEN);
-  if (top[0]) lv_obj_clear_flag(info_top, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(info_bottom, LV_OBJ_FLAG_HIDDEN);
-  if (bottom[0]) lv_obj_clear_flag(info_bottom, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(info_sub, sub);
+  lv_label_set_text(info_detail, detail);
+  Show_If(info_top, top[0]);
+  Show_If(info_sub, sub[0]);
+  Show_If(info_detail, detail[0]);
+}
+
+static lv_obj_t *Edge_Arc(lv_obj_t *parent, lv_color_t color)
+{
+  lv_obj_t *arc = lv_arc_create(parent);
+  lv_obj_set_size(arc, RING_SIZE, RING_SIZE);
+  lv_obj_center(arc);
+  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(arc, 0, 0);
+  lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);     // no track, just the indicator
+  lv_obj_set_style_arc_width(arc, RING_WIDTH, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
+  lv_arc_set_bg_angles(arc, 0, 360);
+  return arc;
 }
 
 void Nav_Screen_Create(void)
@@ -181,119 +374,128 @@ void Nav_Screen_Create(void)
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Progress ring around the edge: starts at 12 o'clock and fills clockwise
-  ring = lv_arc_create(scr);
-  lv_obj_set_size(ring, RING_SIZE, RING_SIZE);
-  lv_obj_center(ring);
+  // Thin progress ring near the edge: starts at 12 o'clock and fills clockwise
+  ring = Edge_Arc(scr, COLOR_BLUE);
   lv_arc_set_rotation(ring, 270);
-  lv_arc_set_bg_angles(ring, 0, 360);
   lv_arc_set_range(ring, 0, 360);
   lv_arc_set_value(ring, 0);
-  lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
-  lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_pad_all(ring, 0, 0);
-  lv_obj_set_style_arc_width(ring, RING_WIDTH, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(ring, COLOR_RING_BG, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(ring, RING_WIDTH, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(ring, COLOR_ACCENT, LV_PART_INDICATOR);
 
-  turn_group = Full_Screen_Group(scr);
-
-  // Turn arrow, upper part of the circle
-  lv_obj_t *arrow_box = lv_obj_create(turn_group);
-  lv_obj_remove_style_all(arrow_box);
-  lv_obj_set_size(arrow_box, ARROW_BOX, ARROW_BOX);
-  lv_obj_align(arrow_box, LV_ALIGN_CENTER, 0, -112);
-  arrow_stem = Arrow_Line_Create(arrow_box);
-  arrow_head = Arrow_Line_Create(arrow_box);
-
-  // Distance: huge number plus a smaller unit, sitting on the same baseline
-  lv_obj_t *dist_row = lv_obj_create(turn_group);
-  lv_obj_remove_style_all(dist_row);
-  lv_obj_set_size(dist_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow(dist_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(dist_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-  lv_obj_set_style_pad_column(dist_row, 8, 0);
-  lv_obj_align(dist_row, LV_ALIGN_CENTER, 0, 36);
-
-  dist_label = lv_label_create(dist_row);
-  lv_obj_set_style_text_font(dist_label, &font_dist_132, 0);
-  lv_obj_set_style_text_color(dist_label, COLOR_TEXT, 0);
-
-  unit_label = lv_label_create(dist_row);
-  lv_obj_set_style_text_font(unit_label, &font_unit_44, 0);
-  lv_obj_set_style_text_color(unit_label, COLOR_UNIT, 0);
-  lv_obj_set_style_pad_bottom(unit_label, font_dist_132.base_line - font_unit_44.base_line, 0);
-
-  // Road name, lower part of the circle
-  // Up to two lines; "..." only if it still doesn't fit. Width is what the circle allows at line 2.
-  road_label = lv_label_create(turn_group);
-  lv_obj_set_size(road_label, 290, 2 * font_road_30.line_height + ROAD_LINE_SPACE);
-  lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
-  lv_obj_set_style_text_align(road_label, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(road_label, &font_road_30, 0);
-  lv_obj_set_style_text_line_space(road_label, ROAD_LINE_SPACE, 0);
-  lv_obj_set_style_text_color(road_label, COLOR_ROAD, 0);
-  lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 343);
-
-  ring_tip = lv_obj_create(scr);
-  lv_obj_remove_style_all(ring_tip);
-  lv_obj_set_size(ring_tip, RING_WIDTH, RING_WIDTH);
+  ring_tip = Plain_Box(scr, RING_WIDTH, RING_WIDTH);
   lv_obj_set_style_radius(ring_tip, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(ring_tip, COLOR_ACCENT, 0);
+  lv_obj_set_style_bg_color(ring_tip, COLOR_BLUE, 0);
   lv_obj_set_style_bg_opa(ring_tip, LV_OPA_COVER, 0);
   lv_obj_add_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
   lv_timer_create(Ring_Frame, RING_FRAME_MS, NULL);
 
-  // Info screens: up to three centred lines, the middle one large
-  info_group = Full_Screen_Group(scr);
+  spinner = Edge_Arc(scr, COLOR_AMBER);
+  lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
+  spinner_timer = lv_timer_create(Spinner_Tick, 30, NULL);
+  lv_timer_pause(spinner_timer);
+
+  /* Turn screen */
+  turn_group = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
+
+  // Header: arrow, distance and unit on one line, sharing a baseline
+  lv_obj_t *header = Plain_Box(turn_group, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(header, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+  lv_obj_set_style_pad_column(header, 8, 0);
+  lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 88);
+
+  lv_obj_t *arrow_box = Plain_Box(header, HEAD_ARROW_W, HEAD_ARROW_H);
+  head_stem = Line_Create(arrow_box, HEAD_ARROW_LINE, COLOR_TEXT, LV_OPA_COVER);
+  head_tip = Line_Create(arrow_box, HEAD_ARROW_LINE, COLOR_TEXT, LV_OPA_COVER);
+
+  dist_label = Label_Create(header, &font_big_104, COLOR_TEXT);
+  unit_label = Label_Create(header, &font_text_32, COLOR_GREY);
+  // The fonts leave different space under their baselines; shift the unit so both sit on one line
+  lv_obj_set_style_translate_y(unit_label, font_text_32.base_line - font_big_104.base_line, 0);
+
+  road_label = Label_Create(turn_group, &font_text_32, COLOR_GREY);
+  lv_obj_set_width(road_label, 380);
+  lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
+  lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 172);
+
+  // Route drawing, clipped to its own area so it never runs into the text
+  lv_obj_t *path_area = Plain_Box(turn_group, PATH_W, PATH_H);
+  lv_obj_set_pos(path_area, PATH_X, PATH_Y);
+  path_behind = Line_Create(path_area, PATH_LINE, COLOR_SOFT, LV_OPA_20);
+  path_ahead = Line_Create(path_area, PATH_LINE, COLOR_SOFT, LV_OPA_90);
+  path_head = Line_Create(path_area, 10, COLOR_SOFT, LV_OPA_90);
+  Path_Clear();
+  Marker_Create(path_area);
+
+  /* Shared bottom line: arrival time and distance left */
+  eta_label = Label_Create(scr, &font_text_32, COLOR_SOFT);
+  lv_obj_align(eta_label, LV_ALIGN_TOP_MID, 0, 386);
+  lv_obj_add_flag(eta_label, LV_OBJ_FLAG_HIDDEN);
+
+  /* Info screens */
+  info_group = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
   lv_obj_set_flex_flow(info_group, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(info_group, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_row(info_group, 4, 0);
-  info_top = Info_Label(info_group, &font_road_30, COLOR_ROAD);
-  info_main = Info_Label(info_group, &font_unit_44, COLOR_TEXT);
-  info_bottom = Info_Label(info_group, &font_road_30, COLOR_UNIT);
+  lv_obj_set_style_pad_row(info_group, 6, 0);
+  Icons_Create(info_group);
+  info_top = Label_Create(info_group, &font_text_32, COLOR_GREY);
+  info_main = Label_Create(info_group, &font_title_44, COLOR_TEXT);
+  info_sub = Label_Create(info_group, &font_small_26, COLOR_GREY);
+  lv_obj_set_width(info_sub, 340);
+  lv_label_set_long_mode(info_sub, LV_LABEL_LONG_DOT);
+  info_detail = Label_Create(info_group, &font_text_32, COLOR_SOFT);
 
   Nav_Screen_Show_Waiting();
 }
 
+/********************************* Screens *********************************/
 void Nav_Screen_Show_Waiting(void)
 {
+  have_trip = false;
   Set_Mode(MODE_WAITING);
   Nav_Screen_Set_Stale(false);
-  Ring_Set_Fixed(0, COLOR_ACCENT);
-  Set_Info("", "BikePod", &font_unit_44, COLOR_TEXT, "Waiting for phone");
+  Ring_Set_Fixed(0);
+  Set_Info(NULL, "", "BikePod", &font_title_44, "Waiting for phone", "");
 }
 
 void Nav_Screen_Show_Rerouting(void)
 {
-  if (mode != MODE_REROUTING) {                // repeats of the same screen only update the text
+  if (mode != MODE_REROUTING) {             // repeats of the same screen only update the text
     Set_Mode(MODE_REROUTING);
-    Ring_Set_Fixed(1000, COLOR_AMBER);
+    Path_Clear();
   }
-  Set_Info("", "Rerouting", &font_unit_44, COLOR_AMBER, "Finding a new route");
+  Set_Info(icon_reroute, "", "Rerouting", &font_title_44, "Finding a new route", "");
 }
 
-void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min)
+void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, const char *place)
 {
-  char summary[32];
-  snprintf(summary, sizeof(summary), "%.1f km  /  %lu min", trip_km, (unsigned long)trip_min);
-  if (mode != MODE_ARRIVED) {                // repeats of the same screen only update the text
+  char summary[40];
+  snprintf(summary, sizeof(summary), "%.1f km " MIDDLE_DOT " %lu min", trip_km, (unsigned long)trip_min);
+  have_trip = false;
+  if (mode != MODE_ARRIVED) {
     Set_Mode(MODE_ARRIVED);
-    Ring_Set_Fixed(1000, COLOR_ACCENT);
+    Ring_Set_Fixed(1000);
   }
-  Set_Info("", "Arrived", &font_unit_44, COLOR_ACCENT, summary);
+  Set_Info(icon_target, "", "Arrived", &font_title_44, place, summary);
 }
 
 void Nav_Screen_Show_Cruise(uint32_t speed_kmh, const char *clock)
 {
   char speed[8];
   snprintf(speed, sizeof(speed), "%lu", (unsigned long)speed_kmh);
-  if (mode != MODE_CRUISE) {                // repeats of the same screen only update the text
+  have_trip = false;
+  if (mode != MODE_CRUISE) {
     Set_Mode(MODE_CRUISE);
-    Ring_Set_Fixed(0, COLOR_ACCENT);
+    Ring_Set_Fixed(0);
   }
-  Set_Info(clock, speed, &font_dist_132, COLOR_TEXT, "km/h");
+  Set_Info(NULL, clock, speed, &font_big_104, "km/h", "");
+}
+
+void Nav_Screen_Set_Trip(const char *eta, float km_left)
+{
+  char text[40];
+  snprintf(text, sizeof(text), "%s " MIDDLE_DOT " %.1f km", eta, km_left);
+  lv_label_set_text(eta_label, text);
+  have_trip = true;
+  Show_If(eta_label, mode == MODE_TURN || mode == MODE_REROUTING);
 }
 
 // No message for a while: fade everything so an old distance never looks current
@@ -304,6 +506,7 @@ void Nav_Screen_Set_Stale(bool now_stale)
   lv_opa_t opa = stale ? LV_OPA_40 : LV_OPA_COVER;
   lv_obj_set_style_opa(turn_group, opa, 0);
   lv_obj_set_style_opa(info_group, opa, 0);
+  lv_obj_set_style_opa(eta_label, opa, 0);
   lv_obj_set_style_opa(ring, opa, 0);
   lv_obj_set_style_opa(ring_tip, opa, 0);
 }
@@ -317,20 +520,22 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
 {
   if (mode != MODE_TURN) {
     Set_Mode(MODE_TURN);
-    Ring_Set_Fixed(0, COLOR_ACCENT);   // a fresh approach after another screen
+    Ring_Set_Fixed(0);   // a fresh approach after another screen
   }
+  turn_distance_m = distance_m;
+
   switch (dir) {
     case TURN_LEFT:
-      lv_line_set_points(arrow_stem, left_stem, 4);
-      lv_line_set_points(arrow_head, left_head, 3);
+      lv_line_set_points(head_stem, left_stem, 4);
+      lv_line_set_points(head_tip, left_tip, 3);
       break;
     case TURN_RIGHT:
-      lv_line_set_points(arrow_stem, right_stem, 4);
-      lv_line_set_points(arrow_head, right_head, 3);
+      lv_line_set_points(head_stem, right_stem, 4);
+      lv_line_set_points(head_tip, right_tip, 3);
       break;
     default:
-      lv_line_set_points(arrow_stem, ahead_stem, 2);
-      lv_line_set_points(arrow_head, ahead_head, 3);
+      lv_line_set_points(head_stem, ahead_stem, 2);
+      lv_line_set_points(head_tip, ahead_tip, 3);
       break;
   }
 
@@ -348,52 +553,4 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
 
   Ring_Set_Target(progress);
   lv_label_set_text(road_label, road);
-}
-
-/********************************* Fake data for testing without a phone *********************************/
-struct Fake_Turn {
-  Turn_Dir dir;
-  uint32_t start_m;
-  const char *road;
-};
-
-static const Fake_Turn fake_turns[] = {
-  { TURN_RIGHT,    400,  "MG Road" },
-  { TURN_LEFT,     1500, "Outer Ring Road" },
-  { TURN_STRAIGHT, 250,  "NH 48" },
-};
-
-#define FAKE_TICK_MS    100
-#define FAKE_TICKS      80      // each approach lasts 8 s
-#define FAKE_HOLD_TICKS 15      // stay on "0 m" for 1.5 s before the next turn
-
-static void Fake_Data_Tick(lv_timer_t *timer)
-{
-  static uint8_t turn = 0;
-  static uint16_t tick = 0;
-  const Fake_Turn &t = fake_turns[turn];
-
-  uint16_t done = tick > FAKE_TICKS ? FAKE_TICKS : tick;
-  uint32_t distance = t.start_m - t.start_m * done / FAKE_TICKS;
-  Nav_Screen_Update(t.dir, distance, done * 1000 / FAKE_TICKS, t.road);
-
-  if (++tick > FAKE_TICKS + FAKE_HOLD_TICKS) {
-    tick = 0;
-    turn = (turn + 1) % (sizeof(fake_turns) / sizeof(fake_turns[0]));
-  }
-}
-
-static lv_timer_t *fake_timer = NULL;
-
-void Nav_Fake_Data_Start(void)
-{
-  if (!fake_timer) fake_timer = lv_timer_create(Fake_Data_Tick, FAKE_TICK_MS, NULL);
-}
-
-void Nav_Fake_Data_Stop(void)
-{
-  if (fake_timer) {
-    lv_timer_del(fake_timer);
-    fake_timer = NULL;
-  }
 }
