@@ -78,12 +78,9 @@ void setup()
   delay(120);                       // ms
   TCA9554PWR_Init(0x00);            // I/O expander: all pins output
   Set_EXIO(EXIO_PIN8, Low);         // buzzer off
-  // Start the screen from a task on core 0, so the screen's interrupts (which copy the picture
-  // from PSRAM to the panel continuously, ~36 MB/s) run on core 0 and leave core 1 to draw
-  static volatile bool lcd_ready = false;
-  xTaskCreatePinnedToCore([](void *) { LCD_Init(); lcd_ready = true; vTaskDelete(NULL); },
-                          "lcd_init", 4096, NULL, 5, NULL, 0);
-  while (!lcd_ready) delay(1);      // screen, touch, backlight
+  // Screen on this core (1). Starting it from core 0 put its picture-copying interrupts next to
+  // Bluetooth, which delayed them: the picture slipped (the old drift problem) for ~10% speed.
+  LCD_Init();                       // screen, touch, backlight
   Set_Backlight(100);               // full brightness for daylight
   Lvgl_Init();
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
