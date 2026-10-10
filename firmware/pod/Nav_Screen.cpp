@@ -7,6 +7,7 @@
 #include "Nav_Screen.h"
 #include <Arduino.h>
 #include "Map_Layer.h"
+#include "Pages.h"
 #include <esp_heap_caps.h>
 #include <stdio.h>
 #include <math.h>
@@ -122,6 +123,13 @@ static lv_obj_t *Label_Create(lv_obj_t *parent, const lv_font_t *font, lv_color_
   return label;
 }
 
+// Setting a label's text always redraws it (and whatever is under it, often the map), even
+// when the text is the same: most updates repeat it, so only set it when it changes
+static void Set_Text(lv_obj_t *label, const char *text)
+{
+  if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
 static void Show_If(lv_obj_t *obj, bool show)
 {
   if (show) lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -162,6 +170,7 @@ static void Ring_Draw(float value)
 
 static void Ring_Frame(lv_timer_t *timer)
 {
+  if (Pages_Current() != 0) return;         // covered by another page: redrawing it is wasted work
   float coast = LV_MIN(lv_tick_elaps(ring_target_ms), RING_MAX_COAST_MS);
   float predicted = LV_MIN(ring_target + ring_rate * coast, 1000.0f);
   float next = ring_shown + (predicted - ring_shown) * 0.15f;   // ease in, ~100 ms time constant
@@ -399,11 +408,11 @@ static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv
 {
   Show_If(icon_target, icon == icon_target);
   Show_If(icon_reroute, icon == icon_reroute);
-  lv_label_set_text(info_top, top);
-  lv_label_set_text(info_main, main);
+  Set_Text(info_top, top);
+  Set_Text(info_main, main);
   lv_obj_set_style_text_font(info_main, main_font, 0);
-  lv_label_set_text(info_sub, sub);
-  lv_label_set_text(info_detail, detail);
+  Set_Text(info_sub, sub);
+  Set_Text(info_detail, detail);
   Show_If(info_top, top[0]);
   Show_If(info_sub, sub[0]);
   Show_If(info_detail, detail[0]);
@@ -535,6 +544,7 @@ void Nav_Screen_Create(void)
 void Nav_Screen_Show_Waiting(void)
 {
   have_trip = false;
+  Map_Layer_Clear();                        // the phone is gone: its position and route are stale
   Set_Mode(MODE_WAITING);
   Nav_Screen_Set_Stale(false);
   Ring_Set_Fixed(0);
@@ -578,7 +588,7 @@ void Nav_Screen_Set_Trip(const char *eta, float km_left)
 {
   char text[40];
   snprintf(text, sizeof(text), "%s " MIDDLE_DOT " %.1f km", eta, km_left);
-  lv_label_set_text(eta_label, text);
+  Set_Text(eta_label, text);
   have_trip = true;
   Show_If(eta_label, mode == MODE_TURN || mode == MODE_REROUTING);
 }
@@ -617,40 +627,46 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
   turn_distance_m = distance_m;
   Map_Layer_Set_Turn_Distance(distance_m);   // the map zooms in as the turn gets closer
 
-  switch (dir) {
-    case TURN_LEFT:
-      lv_line_set_points(head_stem, left_stem, STEM_POINTS);
-      lv_line_set_points(head_tip, left_tip, 3);
-      break;
-    case TURN_RIGHT:
-      lv_line_set_points(head_stem, right_stem, STEM_POINTS);
-      lv_line_set_points(head_tip, right_tip, 3);
-      break;
-    default:
-      lv_line_set_points(head_stem, ahead_stem, 2);
-      lv_line_set_points(head_tip, ahead_tip, 3);
-      break;
+  static int shown_dir = -1;                // arrow shapes only change with the direction
+  if ((int)dir != shown_dir) {
+    shown_dir = dir;
+    switch (dir) {
+      case TURN_LEFT:
+        lv_line_set_points(head_stem, left_stem, STEM_POINTS);
+        lv_line_set_points(head_tip, left_tip, 3);
+        break;
+      case TURN_RIGHT:
+        lv_line_set_points(head_stem, right_stem, STEM_POINTS);
+        lv_line_set_points(head_tip, right_tip, 3);
+        break;
+      default:
+        lv_line_set_points(head_stem, ahead_stem, 2);
+        lv_line_set_points(head_tip, ahead_tip, 3);
+        break;
+    }
   }
 
   // Round like a car navigator: 1.2 km, 350 m (10 m steps), 45 m (5 m steps)
   char num[12];
   if (distance_m >= 1000) {
     snprintf(num, sizeof(num), "%.1f", distance_m / 1000.0f);
-    lv_label_set_text(unit_label, "km");
+    Set_Text(unit_label, "km");
   } else {
     uint32_t step = distance_m >= 100 ? 10 : 5;
     snprintf(num, sizeof(num), "%lu", (unsigned long)((distance_m + step / 2) / step * step));
-    lv_label_set_text(unit_label, "m");
+    Set_Text(unit_label, "m");
   }
-  lv_label_set_text(dist_label, num);
+  Set_Text(dist_label, num);
 
   Ring_Set_Target(progress);
 
   // Long names: try the smaller font before cutting the name off with "..."
-  lv_point_t size;
-  lv_txt_get_size(&size, road, &font_text_32, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-  lv_obj_set_style_text_font(road_label, size.x > lv_obj_get_width(road_label) ? &font_small_26 : &font_text_32, 0);
-  lv_label_set_text(road_label, road);
+  if (strcmp(lv_label_get_text(road_label), road) != 0) {
+    lv_point_t size;
+    lv_txt_get_size(&size, road, &font_text_32, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_style_text_font(road_label, size.x > lv_obj_get_width(road_label) ? &font_small_26 : &font_text_32, 0);
+    lv_label_set_text(road_label, road);
+  }
 }
 
 // Serial "hide glow" / "hide vignette" (and "show ..."): for measuring what costs frame time

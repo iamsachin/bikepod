@@ -5,6 +5,7 @@
 #include "Pages.h"
 #include <lvgl.h>
 #include "Lean_Screen.h"
+#include "Map_Layer.h"
 
 #define PAGE_COUNT 2
 
@@ -15,6 +16,7 @@ void Pages_Show(int new_page)
   if (new_page < 0 || new_page >= PAGE_COUNT || new_page == page) return;
   page = new_page;
   Lean_Screen_Show(page == 1);
+  Map_Layer_Set_Visible(page == 0);
 }
 
 int Pages_Current(void)

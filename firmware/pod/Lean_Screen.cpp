@@ -109,10 +109,12 @@ static void Sample(lv_timer_t *timer)
 
   w = Sub(w, gyro_bias);
   // Real time since the last reading: this runs in the screen's loop, which can be late while a
-  // frame is being drawn (assuming a fixed 10 ms made rotations count up to 10x too small)
+  // frame is being drawn (assuming a fixed 10 ms made rotations count up to 10x too small). Map
+  // frames take up to ~100 ms, so the cap must be above that or rotation is lost (and the max
+  // lean recorded while the map is on screen comes out too small)
   static uint32_t last_us = 0;
   uint32_t now_us = micros();
-  float dt = last_us ? fminf((now_us - last_us) / 1e6f, 0.05f) : SAMPLE_MS / 1000.0f;
+  float dt = last_us ? fminf((now_us - last_us) / 1e6f, 0.25f) : SAMPLE_MS / 1000.0f;
   last_us = now_us;
   lean += Dot(w, forward) * dt;                        // roll rate, + = leaning further right
 

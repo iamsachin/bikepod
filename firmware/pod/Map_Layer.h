@@ -28,7 +28,8 @@ void Map_Layer_Set_Turn_Distance(float metres);
 void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count);
 void Map_Layer_Clear_Route(void);
 bool Map_Layer_Has_Map(void);
-void Map_Layer_Clear(void);
+void Map_Layer_Clear(void);                                  // forget pose, route and turn (phone gone)
+void Map_Layer_Set_Visible(bool visible);                    // false while another page covers the map
 void Map_Layer_Debug_Print(void);
 // Edge fade: the band fades in over `top_px` at its top and out over `bottom_px` at its bottom,
 // and towards the round screen's rim from radius `rim_from` (clear) to `rim_to` (black)

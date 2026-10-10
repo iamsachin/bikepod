@@ -47,25 +47,51 @@ static String Rest(const String &text, int n)
   return text.substring(start);
 }
 
-// "x,y;x,y;..." -> points
-static uint8_t Parse_Path(const String &list, int16_t (*pts)[2])
+// Everything after the n-th '|', without copying
+static const char *Rest_Ptr(const String &text, int n)
+{
+  const char *p = text.c_str();
+  for (int i = 0; i < n; i++) {
+    p = strchr(p, '|');
+    if (!p) return "";
+    p++;
+  }
+  return p;
+}
+
+// "x,y;x,y;..." -> points. Parsed in place: a String per number made thousands of small
+// allocations per map area, in the Bluetooth task's (scarce) internal RAM
+static uint8_t Parse_Points(const char *s, int16_t (*pts)[2], uint8_t max)
 {
   uint8_t count = 0;
-  int pos = 0;
-  while (pos < (int)list.length() && count < NAV_PATH_MAX_POINTS) {
-    int semi = list.indexOf(';', pos);
-    if (semi < 0) semi = list.length();
-    int comma = list.indexOf(',', pos);
-    if (comma > pos && comma < semi) {
-      pts[count][0] = list.substring(pos, comma).toInt();
-      pts[count][1] = list.substring(comma + 1, semi).toInt();
-      count++;
-    }
-    pos = semi + 1;
+  while (*s && count < max) {
+    char *end;
+    long x = strtol(s, &end, 10);
+    if (end == s || *end != ',') break;
+    s = end + 1;
+    long y = strtol(s, &end, 10);
+    if (end == s) break;
+    pts[count][0] = (int16_t)x;
+    pts[count][1] = (int16_t)y;
+    count++;
+    if (*end != ';') break;
+    s = end + 1;
   }
   return count;
 }
 
+// Copies text, cut at a whole UTF-8 character if it doesn't fit (a cut through a character
+// shows as a broken glyph, e.g. in Kannada road names)
+static void Copy_Text(const char *src, char *dst, size_t size)
+{
+  size_t n = strlen(src);
+  if (n >= size) {
+    n = size - 1;
+    while (n > 0 && ((uint8_t)src[n] & 0xC0) == 0x80) n--;   // back to the start of a character
+  }
+  memcpy(dst, src, n);
+  dst[n] = 0;
+}
 
 // Map lines come in bursts of ~100, too many for the message queue: they go straight into
 // the map's own buffer. Returns true if the line was a map line.
@@ -73,43 +99,14 @@ static bool Handle_Map_Line(const String &text)
 {
   if (text.startsWith("MAP|")) {
     static int16_t pts[NAV_PATH_MAX_POINTS * 2][2];
-    uint16_t id = Field(text, 1).toInt();
-    uint8_t road_class = Field(text, 2).toInt();
-    String list = Rest(text, 3);
-    uint8_t count = 0;
-    int pos = 0;
-    while (pos < (int)list.length() && count < NAV_PATH_MAX_POINTS * 2) {
-      int semi = list.indexOf(';', pos);
-      if (semi < 0) semi = list.length();
-      int comma = list.indexOf(',', pos);
-      if (comma > pos && comma < semi) {
-        pts[count][0] = list.substring(pos, comma).toInt();
-        pts[count][1] = list.substring(comma + 1, semi).toInt();
-        count++;
-      }
-      pos = semi + 1;
-    }
-    Map_Data_Add_Road(id, road_class, pts, count);
+    uint8_t count = Parse_Points(Rest_Ptr(text, 3), pts, NAV_PATH_MAX_POINTS * 2);
+    Map_Data_Add_Road(Field(text, 1).toInt(), Field(text, 2).toInt(), pts, count);
     return true;
   }
   if (text.startsWith("FUEL|")) {
     static int16_t pts[16][2];
-    uint16_t id = Field(text, 1).toInt();
-    String list = Rest(text, 2);
-    uint8_t count = 0;
-    int pos = 0;
-    while (pos < (int)list.length() && count < 16) {
-      int semi = list.indexOf(';', pos);
-      if (semi < 0) semi = list.length();
-      int comma = list.indexOf(',', pos);
-      if (comma > pos && comma < semi) {
-        pts[count][0] = list.substring(pos, comma).toInt();
-        pts[count][1] = list.substring(comma + 1, semi).toInt();
-        count++;
-      }
-      pos = semi + 1;
-    }
-    Map_Data_Add_Fuel(id, pts, count);
+    uint8_t count = Parse_Points(Rest_Ptr(text, 2), pts, 16);
+    Map_Data_Add_Fuel(Field(text, 1).toInt(), pts, count);
     return true;
   }
   if (text.startsWith("MAPBEGIN|")) {
@@ -155,7 +152,7 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   if (kind == "RPATH") {
     msg->kind = MSG_ROUTE;
     msg->area_id = Field(text, 1).toInt();
-    msg->path_count = Parse_Path(Rest(text, 2), msg->path);
+    msg->path_count = Parse_Points(Rest_Ptr(text, 2), msg->path, NAV_PATH_MAX_POINTS);
     return true;
   }
   if (kind == "REROUTE") {
@@ -166,7 +163,7 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     msg->kind = MSG_ARRIVED;
     msg->km = Field(text, 1).toFloat();
     msg->trip_min = Field(text, 2).toInt();
-    Rest(text, 3).toCharArray(msg->text, sizeof(msg->text));
+    Copy_Text(Rest_Ptr(text, 3), msg->text, sizeof(msg->text));
     return true;
   }
   if (kind == "CRUISE") {
@@ -186,7 +183,7 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   }
   msg->kind = MSG_TURN;
   msg->distance_m = Field(text, 1).toInt();
-  Rest(text, 2).toCharArray(msg->text, sizeof(msg->text));
+  Copy_Text(Rest_Ptr(text, 2), msg->text, sizeof(msg->text));
   return true;
 }
 

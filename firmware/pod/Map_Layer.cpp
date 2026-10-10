@@ -143,6 +143,12 @@ static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
 static float route[ROUTE_MAX][2];
 static float route_along[ROUTE_MAX];    // distance along the route to each point, metres
 static uint16_t route_count = 0;
+// The last route received (the phone repeats it with every update): forgotten when the route is
+// cleared, or the same route sent again later would be ignored and never drawn
+static int16_t last_route_in[48][2];
+static uint8_t last_count = 0;
+static uint16_t last_area = 0xFFFF;
+
 
 static void Refresh_Pose(void);
 
@@ -392,6 +398,8 @@ void Map_Layer_Clear(void)
   pose_ok = false;
   has_route = false;
   route_count = 0;
+  last_area = 0xFFFF;                   // the same route sent again must be drawn
+  turn_dist = -1;
   drawn_x = 1e9;
   if (layer) lv_obj_invalidate(layer);
 }
@@ -435,10 +443,7 @@ static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, flo
 
 void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
 {
-  // The phone repeats the route with every update: nothing to do if it hasn't changed
-  static int16_t last[48][2];
-  static uint8_t last_count = 0;
-  static uint16_t last_area = 0xFFFF;
+  int16_t (*last)[2] = last_route_in;
   if (count > 48) count = 48;
   if (area_id == last_area && count == last_count && memcmp(last, pts, count * sizeof(last[0])) == 0) return;
   memcpy(last, pts, count * sizeof(last[0]));
@@ -461,6 +466,8 @@ void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t coun
 void Map_Layer_Clear_Route(void)
 {
   route_count = 0;
+  has_route = false;
+  last_area = 0xFFFF;
   if (layer) lv_obj_invalidate(layer);
 }
 
@@ -992,6 +999,13 @@ void Map_Layer_Poll(void)
 }
 
 bool map_cam_log = false;   // serial "camlog": print every new map frame's camera
+static bool map_visible = true;
+
+void Map_Layer_Set_Visible(bool visible)
+{
+  map_visible = visible;
+  if (visible && layer) lv_obj_invalidate(layer);
+}
 
 // Every frame: move the camera and zoom, and redraw only if the picture actually changes
 static void Frame(lv_timer_t *timer)
@@ -1012,7 +1026,8 @@ static void Frame(lv_timer_t *timer)
     zoom_mid += (zoom_target - zoom_mid) * k;
     zoom += (zoom_mid - zoom) * k;
   }
-  if (!pose_ok || !layer) return;
+  // Covered by another page (the lean screen): its redraws would only repaint that page
+  if (!pose_ok || !layer || !map_visible) return;
   Update_Camera(now);
   float moved_px = sqrtf((cam_x - drawn_x) * (cam_x - drawn_x) + (cam_y - drawn_y) * (cam_y - drawn_y)) * zoom;
   if (moved_px > 0.3f || fabsf(cam_h - drawn_h) > 0.15f || fabsf(zoom - drawn_zoom) > 0.002f * zoom) {
