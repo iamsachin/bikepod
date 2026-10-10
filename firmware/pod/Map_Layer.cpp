@@ -237,6 +237,21 @@ static void Route_Point(float s, float *x, float *y)
   *y = route[i][1] + t * (route[i + 1][1] - route[i][1]);
 }
 
+// Nearest point of the route to (px, py) (route-relative): distance along it, returns distance squared
+static float Nearest_On_Route(float px, float py, float *s)
+{
+  float best = 1e18f;
+  *s = 0;
+  for (uint16_t i = 0; i + 1 < route_count; i++) {
+    float ax = route[i][0], ay = route[i][1], dx = route[i + 1][0] - ax, dy = route[i + 1][1] - ay;
+    float len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? LV_CLAMP(0.0f, ((px - ax) * dx + (py - ay) * dy) / len2, 1.0f) : 0;
+    float qx = ax + t * dx - px, qy = ay + t * dy - py, d2 = qx * qx + qy * qy;
+    if (d2 < best) { best = d2; *s = route_along[i] + t * sqrtf(len2); }
+  }
+  return best;
+}
+
 // Where the rider should be now (area on screen). On the route, the prediction moves along the
 // route at the rider's speed and takes the route's direction (a straight-line guess left the
 // route on every bend, so the arrow drifted off the line). Off the route: straight line.
@@ -246,14 +261,7 @@ static void Predict(uint32_t now, float *x, float *y, float *h)
   float ox, oy;
   if (has_route && route_count >= 2 && Convert(route_area, route_ox, route_oy, active->id, &ox, &oy)) {
     // Where the latest pose sits on the route
-    float px = pose_x - ox, py = pose_y - oy, best = 1e18f, s0 = 0;
-    for (uint16_t i = 0; i + 1 < route_count; i++) {
-      float ax = route[i][0], ay = route[i][1], dx = route[i + 1][0] - ax, dy = route[i + 1][1] - ay;
-      float len2 = dx * dx + dy * dy;
-      float t = len2 > 0 ? LV_CLAMP(0.0f, ((px - ax) * dx + (py - ay) * dy) / len2, 1.0f) : 0;
-      float qx = ax + t * dx - px, qy = ay + t * dy - py, d2 = qx * qx + qy * qy;
-      if (d2 < best) { best = d2; s0 = route_along[i] + t * sqrtf(len2); }
-    }
+    float s0, best = Nearest_On_Route(pose_x - ox, pose_y - oy, &s0);
     if (best < 25.0f * 25.0f) {
       float s = s0 + last_pose.speed * dt;
       float rx, ry, ax, ay, bx, by;
@@ -281,6 +289,18 @@ static void Update_Camera(uint32_t now)
   float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
   cam_x = px + off_x * fade;
   cam_y = py + off_y * fade;
+  // On the route, the arrow stays on the line: a fading correction slides straight, which cut
+  // across bends and pulled the arrow off the line for a moment
+  float ox, oy;
+  if (has_route && route_count >= 2 && Convert(route_area, route_ox, route_oy, active->id, &ox, &oy)) {
+    float s, d2 = Nearest_On_Route(cam_x - ox, cam_y - oy, &s);
+    if (d2 < 25.0f * 25.0f) {
+      float rx, ry;
+      Route_Point(s, &rx, &ry);
+      cam_x = ox + rx;
+      cam_y = oy + ry;
+    }
+  }
 
   // Heading: follow the target, but don't turn back against the turn for a small correction
   float dt = cam_at ? fminf((uint32_t)(now - cam_at) / 1000.0f, 0.2f) : 0;
@@ -409,10 +429,10 @@ static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, flo
 void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
 {
   // The phone repeats the route with every update: nothing to do if it hasn't changed
-  static int16_t last[32][2];
+  static int16_t last[48][2];
   static uint8_t last_count = 0;
   static uint16_t last_area = 0xFFFF;
-  if (count > 32) count = 32;
+  if (count > 48) count = 48;
   if (area_id == last_area && count == last_count && memcmp(last, pts, count * sizeof(last[0])) == 0) return;
   memcpy(last, pts, count * sizeof(last[0]));
   last_count = count;
@@ -421,7 +441,7 @@ void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t coun
   route_area = area_id;
   route_ox = route_oy = 0;                  // points are already in that area's frame
   has_route = true;
-  static float in[32][2];
+  static float in[48][2];
   for (uint8_t i = 0; i < count; i++) { in[i][0] = pts[i][0]; in[i][1] = pts[i][1]; }
   // Corners rounded with a fixed radius in metres, so the route keeps its shape as the zoom changes
   route_count = count >= 2 ? Round_Route(in, count, ROUTE_BEND_M, route) : 0;

@@ -11,6 +11,7 @@ enum PathShape {
     static let beyondTurnMetres = 400.0   // runs off the screen and fades out (no arrowhead needed)
     static let maxAheadMetres = 900.0
     static let maxPoints = 20          // keeps one PATH line within a single BLE packet
+    static let mapRoutePoints = 40     // the pod map's route (RPATH, fits one BLE packet)
     static let maxStubs = 14           // keeps one STUB line within a single BLE packet
 
     /// A side street to draw: where it leaves the route (metres, same frame as the shape),
@@ -115,9 +116,18 @@ enum PathShape {
         stubs.sort { $0.distance < $1.distance }
         // Where the drawing's (0,0) is on Earth, and its heading: the map uses the same view
         let originLatLng = (lat: rider.lat + origin.y / metresPerDegLat, lng: rider.lng + origin.x / metresPerDegLng)
-        // The same shape north-up and unrounded (metres from the origin), for the pod's map:
-        // turning the rounded heading-up points back made the route wobble from update to update
-        let northUp = shape.filter { $0 != .zero }.map { p in
+        // The route for the pod's map, north-up metres from the origin. Simplified separately and
+        // much less (from 0.5 m, 40 points): squeezed into 20 points a curvy road was drawn up to
+        // 10 m off, while the rider's position is on the real road, so the arrow left the line.
+        // The rider's own point isn't needed: it lies on the segment between its neighbours.
+        let raw = Array(behind.dropLast()) + Array(ahead.dropFirst())
+        var mapShape: [Point]
+        var mapTolerance = 0.5
+        repeat {
+            mapShape = simplify(raw, mapTolerance)
+            mapTolerance *= 1.4
+        } while mapShape.count > mapRoutePoints
+        let northUp = mapShape.map { p in
             (x: p.x * cos(heading) + p.y * sin(heading), y: -p.x * sin(heading) + p.y * cos(heading))
         }
         return (result, stubs.prefix(maxStubs).map(\.stub), s0, originLatLng, headingDegrees, northUp)
