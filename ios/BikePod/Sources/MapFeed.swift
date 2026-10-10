@@ -10,9 +10,9 @@ final class MapFeed {
     private(set) var areaID = 0
     private(set) var frame: MapArea.Frame?
     private(set) var areaLines: [String] = []
-    /// The area before the current one: the pod may still be showing it while the new one arrives
-    private var previous: (id: Int, frame: MapArea.Frame)?
     private var building = false
+    /// When building an area last failed (tiles couldn't be fetched): retried after a pause
+    private var failedAt: Date?
     private var tileTemplate: String?
     private var decoded: [String: TileContent] = [:]     // tile URL -> roads and fuel stations, in memory
 
@@ -31,6 +31,7 @@ final class MapFeed {
 
     /// True when the rider has moved far enough from the current area for a new one
     func needsArea(lat: Double, lng: Double) -> Bool {
+        if let failedAt, Date().timeIntervalSince(failedAt) < 10 { return false }
         guard let frame else { return true }
         let p = frame.project(lat, lng)
         return hypot(p.x, p.y) > MapArea.refreshMetres
@@ -46,16 +47,21 @@ final class MapFeed {
             var roads: [MapRoad] = []
             var fuel: [(lat: Double, lng: Double)] = []
             for t in VectorTile.tiles(around: lat, lng, radiusMetres: MapArea.radiusMetres, z: Self.zoom) {
-                let content = await tileContent(template: template, x: t.x, y: t.y)
+                // A missing tile (no signal) would send the pod an area with a hole or no roads at
+                // all, replacing a good one: keep the current area and try again shortly
+                guard let content = await tileContent(template: template, x: t.x, y: t.y) else {
+                    failedAt = Date()
+                    return
+                }
                 roads += content.roads
                 fuel += content.fuel
             }
+            failedAt = nil
             let nextID = areaID % 60_000 + 1
             let newFrame = MapArea.Frame(refLat: lat, refLng: lng)
             let lines = await Task.detached(priority: .utility) {
                 MapArea.lines(id: nextID, frame: newFrame, roads: roads, fuel: fuel)
             }.value
-            if let frame { previous = (areaID, frame) }
             areaID = nextID
             frame = newFrame
             areaLines = lines
@@ -68,11 +74,14 @@ final class MapFeed {
         return MapArea.pose(id: areaID, frame: frame, lat: lat, lng: lng, headingDegrees: headingDegrees)
     }
 
-    /// The same pose in the previous area's frame, so the pod can keep drawing that area until
-    /// the new one has fully arrived (otherwise the map blinks out at every area switch)
-    func previousPose(lat: Double, lng: Double, headingDegrees: Double) -> String? {
-        guard let previous else { return nil }
-        return MapArea.pose(id: previous.id, frame: previous.frame, lat: lat, lng: lng, headingDegrees: headingDegrees)
+    /// Downloads the tiles around a point ahead of time (e.g. the start of a planned route)
+    func prefetch(lat: Double, lng: Double) {
+        Task {
+            let template = await resolveTemplate()
+            for t in VectorTile.tiles(around: lat, lng, radiusMetres: MapArea.radiusMetres, z: Self.zoom) {
+                _ = await tileContent(template: template, x: t.x, y: t.y)
+            }
+        }
     }
 
     /// The tile URL pattern changes when OpenFreeMap publishes new data: read it from their TileJSON
@@ -87,11 +96,12 @@ final class MapFeed {
         return tileTemplate ?? Self.fallbackTemplate
     }
 
-    private func tileContent(template: String, x: Int, y: Int) async -> TileContent {
+    /// A tile's roads and fuel stations; nil if it couldn't be fetched
+    private func tileContent(template: String, x: Int, y: Int) async -> TileContent? {
         let urlString = template.replacingOccurrences(of: "{z}", with: "\(Self.zoom)")
             .replacingOccurrences(of: "{x}", with: "\(x)").replacingOccurrences(of: "{y}", with: "\(y)")
         if let content = decoded[urlString] { return content }
-        guard let url = URL(string: urlString) else { return TileContent(roads: [], fuel: []) }
+        guard let url = URL(string: urlString) else { return nil }
 
         // Disk cache, named after the URL path (it includes the data version, so new data is refetched)
         let name = url.path.split(separator: "/").joined(separator: "_")
@@ -102,7 +112,7 @@ final class MapFeed {
             data = fresh
             try? fresh.write(to: file)
         }
-        guard let data else { return TileContent(roads: [], fuel: []) }
+        guard let data else { return nil }
         let content = await Task.detached(priority: .utility) {
             TileContent(roads: VectorTile.roads(from: data, z: Self.zoom, x: x, y: y),
                         fuel: VectorTile.fuelStations(from: data, z: Self.zoom, x: x, y: y))

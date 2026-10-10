@@ -58,9 +58,9 @@ enum VectorTile {
         guard name == "transportation", let classKey = keys.firstIndex(of: "class") else { return [] }
 
         let tiles = Double(1 << z)
-        func latLng(_ px: Int, _ py: Int) -> (lat: Double, lng: Double) {
-            let wx = (Double(x) + Double(px) / extent) / tiles
-            let wy = (Double(y) + Double(py) / extent) / tiles
+        func latLng(_ px: Double, _ py: Double) -> (lat: Double, lng: Double) {
+            let wx = (Double(x) + px / extent) / tiles
+            let wy = (Double(y) + py / extent) / tiles
             return (atan(sinh(.pi * (1 - 2 * wy))) * 180 / .pi, wx * 360 - 180)
         }
 
@@ -89,21 +89,65 @@ enum VectorTile {
 
             // Geometry commands: MoveTo(1) / LineTo(2) with zig-zag encoded deltas
             var cx = 0, cy = 0, i = 0
-            var line: [(lat: Double, lng: Double)] = []
+            var line: [(x: Double, y: Double)] = []
+            func finish() {
+                for piece in clipped(line, extent: extent) {
+                    roads.append(MapRoad(roadClass: roadClass, points: piece.map { latLng($0.x, $0.y) }))
+                }
+                line = []
+            }
             while i < geometry.count {
                 let command = geometry[i] & 0x7, count = geometry[i] >> 3
                 i += 1
-                if command == 1, line.count >= 2 { roads.append(MapRoad(roadClass: roadClass, points: line)) }
-                if command == 1 { line = [] }
+                if command == 1 { finish() }
                 guard command == 1 || command == 2 else { continue }
                 for _ in 0..<count where i + 1 < geometry.count {
                     cx += zigzag(geometry[i]); cy += zigzag(geometry[i + 1]); i += 2
-                    line.append(latLng(cx, cy))
+                    line.append((Double(cx), Double(cy)))
                 }
             }
-            if line.count >= 2 { roads.append(MapRoad(roadClass: roadClass, points: line)) }
+            finish()
         }
         return roads
+    }
+
+    /// The parts of a line inside the tile. Tiles repeat a margin of their neighbours' roads, so
+    /// without clipping every road crossing a tile edge was sent (and drawn) twice there.
+    private static func clipped(_ line: [(x: Double, y: Double)], extent: Double) -> [[(x: Double, y: Double)]] {
+        var pieces: [[(x: Double, y: Double)]] = []
+        var run: [(x: Double, y: Double)] = []
+        for k in 1..<max(line.count, 1) {
+            let a = line[k - 1], b = line[k]
+            // Liang-Barsky: the part of segment a-b inside [0, extent] x [0, extent]
+            var t0 = 0.0, t1 = 1.0
+            let dx = b.x - a.x, dy = b.y - a.y
+            var inside = true
+            for (p, q) in [(-dx, a.x), (dx, extent - a.x), (-dy, a.y), (dy, extent - a.y)] {
+                if p == 0 {
+                    if q < 0 { inside = false }
+                } else {
+                    let r = q / p
+                    if p < 0 { t0 = max(t0, r) } else { t1 = min(t1, r) }
+                }
+            }
+            guard inside, t0 <= t1 else {
+                if run.count >= 2 { pieces.append(run) }
+                run = []
+                continue
+            }
+            let start = (x: a.x + t0 * dx, y: a.y + t0 * dy), end = (x: a.x + t1 * dx, y: a.y + t1 * dy)
+            if run.isEmpty || t0 > 0 {
+                if run.count >= 2 { pieces.append(run) }
+                run = [start]
+            }
+            run.append(end)
+            if t1 < 1 {
+                pieces.append(run)
+                run = []
+            }
+        }
+        if run.count >= 2 { pieces.append(run) }
+        return pieces.filter { $0.count >= 2 }
     }
 
     /// Fuel stations (OpenStreetMap amenity=fuel) from the `poi` layer, as points

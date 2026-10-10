@@ -132,6 +132,9 @@ final class Navigator {
                 return
             }
             phase = .preview(route)
+            // Fetch the map tiles around the start now, so the pod's map is ready the moment
+            // guidance starts (it showed only the route until they had downloaded)
+            if let first = route.geometry.first { mapFeed.prefetch(lat: first.lat, lng: first.lng) }
         } catch {
             guard routeRequestID == requestID else { return }
             phase = .failed("Routing failed: \(error.localizedDescription)")
@@ -234,9 +237,10 @@ final class Navigator {
             // wobble the way points relative to the moving rider did
             if let frame = mapFeed.frame {
                 let o = frame.project(result.origin.lat, result.origin.lng)
-                pathLine = "RPATH|\(mapFeed.areaID)|" + result.northUp.map {
-                    "\(Int((o.x + $0.x).rounded())),\(Int((o.y + $0.y).rounded()))"
-                }.joined(separator: ";")
+                var points = result.northUp.map { "\(Int((o.x + $0.x).rounded())),\(Int((o.y + $0.y).rounded()))" }
+                // One line must fit the pod's 512 bytes: drop points from the far end if needed
+                while points.count > 2, points.joined(separator: ";").utf8.count > 480 { points.removeLast() }
+                pathLine = "RPATH|\(mapFeed.areaID)|" + points.joined(separator: ";")
             }
             // Street map: same origin and heading as the route, so they line up
             let origin = result.origin
@@ -341,8 +345,20 @@ final class Navigator {
         return short.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ".")))
     }
 
-    /// The pod's fonts only contain plain ASCII characters
-    private static func podText(_ text: String) -> String {
-        String(String.UnicodeScalarView(text.unicodeScalars.filter { $0.isASCII && $0 != "|" }))
+    /// The pod's fonts only contain plain ASCII characters: other scripts are written in Latin
+    /// letters and accents dropped ("Hosūr" -> "Hosur", Kannada names -> their Latin spelling)
+    /// instead of losing those letters
+    static func podText(_ text: String) -> String {
+        var latin = text.applyingTransform(.toLatin, reverse: false) ?? text
+        // Names written only in another script come out lower case: capitalise them
+        if !text.unicodeScalars.contains(where: { $0.isASCII && CharacterSet.letters.contains($0) }) {
+            latin = latin.capitalized
+        }
+        var plain = latin.applyingTransform(.stripDiacritics, reverse: false) ?? latin
+        for (fancy, simple) in [("\u{2013}", "-"), ("\u{2014}", "-"), ("\u{2018}", "'"), ("\u{2019}", "'"),
+                                ("\u{201C}", "\""), ("\u{201D}", "\"")] {
+            plain = plain.replacingOccurrences(of: fancy, with: simple)
+        }
+        return String(String.UnicodeScalarView(plain.unicodeScalars.filter { $0.isASCII && $0 != "|" }))
     }
 }

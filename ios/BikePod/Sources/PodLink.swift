@@ -88,7 +88,8 @@ final class PodLink: NSObject {
                 return
             }
             var data = Data(line.utf8)
-            if data.count > 400 { data = data.prefix(400) }
+            // The pod accepts up to 512 bytes (a 400 byte cut once chopped the end off long route lines)
+            if data.count > 512 { data = data.prefix(512) }
             // A line longer than one packet needs the slower acknowledged "long write"
             let fits = data.count <= pod.maximumWriteValueLength(for: .withoutResponse)
             pod.writeValue(data, for: navChar, type: fits ? .withoutResponse : .withResponse)
