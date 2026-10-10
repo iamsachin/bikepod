@@ -113,7 +113,7 @@ static bool Handle_Map_Line(const String &text)
     return true;
   }
   if (text.startsWith("MAPBEGIN|")) {
-    Map_Data_Begin(Field(text, 1).toInt());
+    Map_Data_Begin(Field(text, 1).toInt(), Field(text, 2).toDouble(), Field(text, 3).toDouble());
     return true;
   }
   if (text.startsWith("MAPEND|")) {

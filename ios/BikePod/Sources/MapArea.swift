@@ -48,7 +48,8 @@ enum MapArea {
         // Too much map (very dense areas): keep big roads first, then the nearest
         pieces.sort { ($0.roadClass.rawValue, $0.nearest) < ($1.roadClass.rawValue, $1.nearest) }
         var budget = maxPoints
-        var out = ["MAPBEGIN|\(id)"]
+        // The reference point lets the pod convert positions between areas
+        var out = [String(format: "MAPBEGIN|%d|%.6f|%.6f", id, frame.refLat, frame.refLng)]
         var roadCount = 0
         for piece in pieces {
             var start = 0

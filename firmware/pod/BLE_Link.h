@@ -8,7 +8,8 @@
 //   TRIP|18:42|6.0            arrival time and kilometres left
 //   RPATH|-2,-30;0,0;3,85;... route around the rider in metres, north-up (+x east, +y north),
 //                             relative to the rider at the latest POSE (the rider is 0,0)
-//   MAPBEGIN|7                start of map area 7 (roads around the rider, see Map_Layer.h)
+//   MAPBEGIN|7|12.9|77.6      start of map area 7 (roads around the rider, see Map_Layer.h),
+//                             with its reference point (latitude, longitude)
 //   MAP|7|2|-120,40;-80,35;.. one road of area 7: class (1 major, 2 medium, 3 minor), points in
 //                             metres north-up from the area's reference point
 //   FUEL|7|40,85;-120,300     fuel stations in area 7 (same frame as MAP)

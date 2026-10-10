@@ -65,19 +65,62 @@ LV_FONT_DECLARE(font_fuel_14);       // Material Icons Round "local_gas_station"
 static lv_obj_t *layer;
 static lv_coord_t center_x, center_y;   // where the rider's marker is, inside the layer
 
-/* Poses, per area: while the phone switches to a new area it sends the pose for both, so
-   whichever area is on screen always has a matching pose (no blink at the switch). */
+/* Each map area is in metres north-up around its own reference point (latitude/longitude, sent
+   with MAPBEGIN). Knowing the references, a position in one area converts to any other, so the
+   area on screen can always be drawn from the latest pose, whichever area that pose was sent for
+   (an area that didn't arrive completely no longer makes the map vanish). */
+#define REF_SLOTS 8
+struct Area_Ref { bool valid; uint16_t id; double lat, lng; };
+static Area_Ref refs[REF_SLOTS];
+static uint8_t ref_next = 0;
+static portMUX_TYPE ref_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void Ref_Store(uint16_t id, double lat, double lng)
+{
+  portENTER_CRITICAL(&ref_lock);
+  int slot = -1;
+  for (int i = 0; i < REF_SLOTS; i++) if (refs[i].valid && refs[i].id == id) slot = i;
+  if (slot < 0) { slot = ref_next; ref_next = (ref_next + 1) % REF_SLOTS; }
+  refs[slot] = { true, id, lat, lng };
+  portEXIT_CRITICAL(&ref_lock);
+}
+
+static bool Ref_Find(uint16_t id, double *lat, double *lng)
+{
+  bool found = false;
+  portENTER_CRITICAL(&ref_lock);
+  for (int i = 0; i < REF_SLOTS; i++)
+    if (refs[i].valid && refs[i].id == id) { *lat = refs[i].lat; *lng = refs[i].lng; found = true; }
+  portEXIT_CRITICAL(&ref_lock);
+  return found;
+}
+
+// Converts a point from area `from` to area `to` (same flat projection the phone uses)
+static bool Convert(uint16_t from, float x, float y, uint16_t to, float *ox, float *oy)
+{
+  if (from == to) { *ox = x; *oy = y; return true; }
+  double flat, flng, tlat, tlng;
+  if (!Ref_Find(from, &flat, &flng) || !Ref_Find(to, &tlat, &tlng)) return false;
+  *ox = x + (float)((flng - tlng) * 111320.0 * cos(tlat * M_PI / 180));
+  *oy = y + (float)((flat - tlat) * 110540.0);
+  return true;
+}
+
 struct Pose {
   bool valid;
-  uint16_t area;
-  float x, y, heading;          // metres (area frame), degrees clockwise from north
+  uint16_t area;                // the area this pose was sent in
+  float x, y, heading;          // metres (that area's frame), degrees clockwise from north
   float vx, vy, turn;           // metres/s and degrees/s, measured from successive poses
   uint32_t at;                  // ms
-  float route_x, route_y;       // the latest route's origin in this area's frame
-  bool has_route;
 };
-static Pose poses[2];
-static Pose *pose = NULL;       // the pose matching the area being drawn
+static Pose last_pose;
+static bool pose_ok = false;    // the latest pose converts into the area on screen
+static float pose_x, pose_y;    // ...and there it is
+
+// Route origin: where the rider was (and in which area) when the route arrived
+static uint16_t route_area;
+static float route_ox, route_oy;
+static bool has_route = false;
 
 // Camera (area frame) and zoom
 static float cam_x, cam_y, cam_h;
@@ -90,11 +133,12 @@ static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
 static float route[ROUTE_MAX][2];
 static uint16_t route_count = 0;
 
-static void Pick_Pose(void);
+static void Refresh_Pose(void);
 
 /******************************* Bluetooth task side *******************************/
-void Map_Data_Begin(uint16_t area_id)
+void Map_Data_Begin(uint16_t area_id, double ref_lat, double ref_lng)
 {
+  Ref_Store(area_id, ref_lat, ref_lng);
   portENTER_CRITICAL(&map_lock);
   Map_Area *a = building;
   if (a) {
@@ -167,48 +211,45 @@ static float Wrap180(float d)
   return d;
 }
 
-// Where the rider should be now according to a pose and its measured motion
-static void Predict(const Pose *p, uint32_t now, float *x, float *y, float *h)
+// The latest pose, in the frame of the area on screen
+static void Refresh_Pose(void)
 {
-  float dt = fminf((uint32_t)(now - p->at) / 1000.0f, PREDICT_MAX_S);
-  *x = p->x + p->vx * dt;
-  *y = p->y + p->vy * dt;
-  *h = p->heading + p->turn * dt;
+  pose_ok = active && last_pose.valid && Convert(last_pose.area, last_pose.x, last_pose.y, active->id, &pose_x, &pose_y);
+}
+
+// Where the rider should be now (area on screen) according to the latest pose and its motion
+static void Predict(uint32_t now, float *x, float *y, float *h)
+{
+  float dt = fminf((uint32_t)(now - last_pose.at) / 1000.0f, PREDICT_MAX_S);
+  *x = pose_x + last_pose.vx * dt;
+  *y = pose_y + last_pose.vy * dt;
+  *h = last_pose.heading + last_pose.turn * dt;
 }
 
 static void Update_Camera(uint32_t now)
 {
-  if (!pose) return;
+  if (!pose_ok) return;
   float px, py, ph;
-  Predict(pose, now, &px, &py, &ph);
+  Predict(now, &px, &py, &ph);
   float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
   cam_x = px + off_x * fade;
   cam_y = py + off_y * fade;
   cam_h = ph + off_h * fade;
 }
 
-static void Pick_Pose(void)
-{
-  pose = NULL;
-  for (int i = 0; i < 2; i++)
-    if (active && poses[i].valid && poses[i].area == active->id) pose = &poses[i];
-}
-
 void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
 {
   uint32_t now = lv_tick_get();
-  int slot = poses[0].valid && poses[0].area == area_id ? 0
-           : poses[1].valid && poses[1].area == area_id ? 1
-           : (!poses[0].valid || (poses[1].valid && poses[0].at < poses[1].at)) ? 0 : 1;
-  Pose &p = poses[slot];
-  bool drawn = pose == &p;
+  bool was_drawn = pose_ok && drawn_x < 1e8;
   float before_x = cam_x, before_y = cam_y, before_h = cam_h;   // camera as currently shown
 
-  if (p.valid && p.area == area_id) {
-    // Motion from the previous pose of this area, smoothed a little against GPS jitter
+  Pose p = last_pose;
+  float px, py;
+  // Motion since the previous pose (converted into this pose's area), smoothed against GPS jitter
+  if (p.valid && Convert(p.area, p.x, p.y, area_id, &px, &py)) {
     float dt = (uint32_t)(now - p.at) / 1000.0f;
     if (dt > 0.05f && dt < 3) {
-      float vx = (x - p.x) / dt, vy = (y - p.y) / dt;
+      float vx = (x - px) / dt, vy = (y - py) / dt;
       float turn = LV_CLAMP(-120.0f, Wrap180(heading_deg - p.heading) / dt, 120.0f);
       p.vx = 0.5f * p.vx + 0.5f * vx;
       p.vy = 0.5f * p.vy + 0.5f * vy;
@@ -216,31 +257,32 @@ void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_
     } else if (dt >= 3) {
       p.vx = p.vy = p.turn = 0;
     }
-  } else {
+    if (dt <= 0.05f) return;            // the same moment sent for another area: nothing new
+  } else if (!p.valid) {
     p = Pose{};
-    p.area = area_id;
   }
   p.valid = true;
+  p.area = area_id;
   p.x = x;
   p.y = y;
-  p.heading = p.heading + Wrap180(heading_deg - p.heading);   // keep it continuous (no 359 -> 0 jumps)
+  p.heading = p.heading + Wrap180(heading_deg - p.heading);   // continuous (no 359 -> 0 jumps)
   p.at = now;
+  last_pose = p;
 
-  Pick_Pose();
-  if (pose == &p) {
-    float nx, ny, nh;
-    Predict(&p, now, &nx, &ny, &nh);
-    if (drawn && drawn_x < 1e8) {
-      // Keep the camera where it is and let the difference fade out
-      off_x = before_x - nx;
-      off_y = before_y - ny;
-      off_h = Wrap180(before_h - nh);
-    } else {
-      off_x = off_y = off_h = 0;                   // first pose (or area just switched): start here
-    }
-    off_at = now;
-    Update_Camera(now);
+  Refresh_Pose();
+  if (!pose_ok) return;
+  float nx, ny, nh;
+  Predict(now, &nx, &ny, &nh);
+  if (was_drawn) {
+    // Keep the camera where it is and let the difference fade out
+    off_x = before_x - nx;
+    off_y = before_y - ny;
+    off_h = Wrap180(before_h - nh);
+  } else {
+    off_x = off_y = off_h = 0;
   }
+  off_at = now;
+  Update_Camera(now);
 }
 
 void Map_Layer_Set_Target_Scale(float pixels_per_metre)
@@ -251,13 +293,14 @@ void Map_Layer_Set_Target_Scale(float pixels_per_metre)
 
 bool Map_Layer_Has_Map(void)
 {
-  return active && pose;
+  return pose_ok;
 }
 
 void Map_Layer_Clear(void)
 {
-  poses[0].valid = poses[1].valid = false;
-  pose = NULL;
+  last_pose.valid = false;
+  pose_ok = false;
+  has_route = false;
   route_count = 0;
   drawn_x = 1e9;
   if (layer) lv_obj_invalidate(layer);
@@ -302,13 +345,12 @@ static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, flo
 
 void Map_Layer_Set_Route(const int16_t (*pts)[2], uint8_t count)
 {
-  // The route is relative to the rider at the time of the latest pose: note where that is in
-  // each area's frame, so the route stays put whichever area is drawn
-  for (int i = 0; i < 2; i++) {
-    poses[i].route_x = poses[i].x;
-    poses[i].route_y = poses[i].y;
-    poses[i].has_route = poses[i].valid;
-  }
+  // The route is relative to the rider at the latest pose: remember where that was
+  if (!last_pose.valid) return;
+  route_area = last_pose.area;
+  route_ox = last_pose.x;
+  route_oy = last_pose.y;
+  has_route = true;
   static float in[32][2];
   if (count > 32) count = 32;
   for (uint8_t i = 0; i < count; i++) { in[i][0] = pts[i][0]; in[i][1] = pts[i][1]; }
@@ -439,6 +481,7 @@ IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color
   const int32_t len_q = (int32_t)(len * 256);
   const int32_t in_q = (int32_t)(LV_MAX(half - 0.5f, 0.0f) * 256), out_q = (int32_t)((half + 0.5f) * 256);
   const bool casing = core < half;
+  const bool darken = color.full == 0;              // black casing darkens; lines lighten
   const int32_t core_lo_q = (int32_t)((core - 0.5f) * 256), core_hi_q = (int32_t)((core + 0.5f) * 256);
 
   for (int y = y1; y <= y2; y++) {
@@ -493,8 +536,25 @@ IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color
         if (f >= 250) continue;
         cover = (cover * (256 - f)) >> 8;
       }
-      if (cover >= 250) row[x] = col;
-      else if (cover > 4) row[x] = lv_color_mix(col, row[x], (lv_opa_t)cover);
+      if (cover <= 4) continue;
+      // Pieces of a line overlap at every joint: plain blending would add their soft edges
+      // twice (bright rings). Light lines keep the brighter of old and new, the black casing
+      // keeps the darker, so overlapping pieces merge into one line.
+      lv_color_t old = row[x];
+      if (darken) {
+        uint32_t keep = 255 - cover;
+        lv_color_t dim;
+        dim.ch.red = (old.ch.red * keep) >> 8;
+        dim.ch.green = (old.ch.green * keep) >> 8;
+        dim.ch.blue = (old.ch.blue * keep) >> 8;
+        row[x] = dim;
+      } else {
+        lv_color_t mixed = cover >= 250 ? col : lv_color_mix(col, old, (lv_opa_t)cover);
+        if (mixed.ch.red < old.ch.red) mixed.ch.red = old.ch.red;
+        if (mixed.ch.green < old.ch.green) mixed.ch.green = old.ch.green;
+        if (mixed.ch.blue < old.ch.blue) mixed.ch.blue = old.ch.blue;
+        row[x] = mixed;
+      }
     }
   }
 }
@@ -514,8 +574,8 @@ static void Polyline(const Raster &r, const float (*pts)[2], uint16_t n, float o
 
 static void Draw_Route(const Raster &r)
 {
-  if (route_count < 2 || !pose->has_route) return;
-  float ox = pose->route_x, oy = pose->route_y;
+  float ox, oy;
+  if (route_count < 2 || !has_route || !Convert(route_area, route_ox, route_oy, active->id, &ox, &oy)) return;
 
   // Split where the camera is: nearest point on the route
   float best = 1e18f, px = 0, py = 0;
@@ -550,7 +610,7 @@ static void Draw_Route(const Raster &r)
 
 static void Draw_Event(lv_event_t *e)
 {
-  if (!pose || zoom <= 0) return;
+  if (!pose_ok || zoom <= 0) return;
   uint32_t t0 = micros();
   map_perf_draws++;
   lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
@@ -639,16 +699,9 @@ void Map_Layer_Poll(void)
   }
   portEXIT_CRITICAL(&map_lock);
   if (next) {
-    Pose *before = pose;
-    Pick_Pose();
-    // Switching area: the camera continues from the same place (frames differ only by a shift,
-    // which the new area's pose already accounts for)
-    if (pose && pose != before) {
-      uint32_t now = lv_tick_get();
-      float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
-      off_x *= fade; off_y *= fade; off_h *= fade;
-      off_at = now;
-    }
+    // New area on screen: the latest pose converts into it; the camera carries on smoothly
+    // (corrections are differences, the same in any area's frame)
+    Refresh_Pose();
     if (layer) lv_obj_invalidate(layer);
   }
 }
@@ -661,7 +714,7 @@ static void Frame(lv_timer_t *timer)
   float dt = last ? (uint32_t)(now - last) / 1000.0f : 0;
   last = now;
   if (zoom_target > 0) zoom += (zoom_target - zoom) * (1 - expf(-dt / ZOOM_EASE_S));
-  if (!pose || !layer) return;
+  if (!pose_ok || !layer) return;
   Update_Camera(now);
   float moved_px = sqrtf((cam_x - drawn_x) * (cam_x - drawn_x) + (cam_y - drawn_y) * (cam_y - drawn_y)) * zoom;
   if (moved_px > 0.3f || fabsf(cam_h - drawn_h) > 0.15f || fabsf(zoom - drawn_zoom) > 0.002f * zoom) {
@@ -687,11 +740,9 @@ lv_obj_t *Map_Layer_Create(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coor
 // Serial "cam": camera and data state, for debugging
 void Map_Layer_Debug_Print(void)
 {
-  printf("CAM pose=%d active=%d roads=%u route=%u cam=%.1f,%.1f h=%.1f zoom=%.3f->%.3f off=%.1f,%.1f,%.1f\r\n",
-         pose ? (int)pose->area : -1, active ? (int)active->id : -1, active ? active->road_count : 0, route_count,
-         cam_x, cam_y, cam_h, zoom, zoom_target, off_x, off_y, off_h);
-  if (pose) printf("CAM pose x=%.1f y=%.1f h=%.1f v=%.2f,%.2f turn=%.2f route_at=%.1f,%.1f has=%d\r\n",
-                   pose->x, pose->y, pose->heading, pose->vx, pose->vy, pose->turn, pose->route_x, pose->route_y, pose->has_route);
+  printf("CAM pose_ok=%d pose_area=%d active=%d roads=%u route=%u cam=%.1f,%.1f h=%.1f zoom=%.3f->%.3f\r\n",
+         pose_ok, last_pose.valid ? (int)last_pose.area : -1, active ? (int)active->id : -1,
+         active ? active->road_count : 0, route_count, cam_x, cam_y, cam_h, zoom, zoom_target);
 }
 
 // Serial "rastbench": the capsule loop alone, into an internal-RAM buffer

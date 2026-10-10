@@ -53,7 +53,6 @@ final class Navigator {
     @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
     @ObservationIgnored private var pathLine = ""          // latest "RPATH|..." route for the pod's map
     @ObservationIgnored private var poseLine = ""          // latest "POSE|..." rider in the map area
-    @ObservationIgnored private var previousPoseLine = ""  // same, in the previous area (see MapFeed)
     @ObservationIgnored private var mapSentForConnection = -1
     private let mapFeed = MapFeed()
     /// Sees Valhalla's raw answers on their way into Ferrostar, to keep the junction details
@@ -241,8 +240,6 @@ final class Navigator {
             // Street map: same origin and heading as the route, so they line up
             let origin = result.origin
             poseLine = mapFeed.pose(lat: origin.lat, lng: origin.lng, headingDegrees: result.headingDegrees) ?? ""
-            previousPoseLine = mapFeed.previousPose(lat: origin.lat, lng: origin.lng,
-                                                    headingDegrees: result.headingDegrees) ?? ""
             if mapFeed.needsArea(lat: origin.lat, lng: origin.lng) {
                 mapFeed.buildArea(lat: origin.lat, lng: origin.lng) { [weak self] lines in self?.sendMapArea(lines) }
             }
@@ -276,8 +273,7 @@ final class Navigator {
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
             // Turn first (the pod zooms from the turn distance), poses before the route (the pod
             // anchors the route to the latest pose)
-            return [("turn", turnLine), ("pose", poseLine), ("pose_prev", previousPoseLine), ("path", pathLine),
-                    ("trip", tripLine)]
+            return [("turn", turnLine), ("pose", poseLine), ("path", pathLine), ("trip", tripLine)]
                 .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
