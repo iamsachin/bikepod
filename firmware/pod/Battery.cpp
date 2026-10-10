@@ -65,6 +65,7 @@ int Battery_Percent(void)
   // long rest): then the new value counts.
   static int shown = -1;
   int now = Percent_From_Volts();
-  if (shown < 0 || now < shown || now >= shown + 5) shown = now;
+  // (Free to move until the 30 s average has filled after power-on; 100 = on the charger)
+  if (shown < 0 || count < SAMPLES || now < shown || now >= shown + 5 || now == 100) shown = now;
   return shown;
 }
