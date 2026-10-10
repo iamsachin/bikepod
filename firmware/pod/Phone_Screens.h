@@ -10,5 +10,6 @@ void Music_Screen_Show(bool show);
 bool Call_Screen_Showing(void);
 // A line of album art from the phone (ART|...), from the Bluetooth task
 void Album_Art_Line(const char *line);
+void Album_Art_Debug(void);                   // serial "art"
 // Speed for the music page's top line (metres per second)
 void Music_Set_Speed(float metres_per_second);

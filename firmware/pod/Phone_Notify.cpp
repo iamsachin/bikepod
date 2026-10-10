@@ -17,6 +17,7 @@
 #include <BLEClient.h>
 #include <BLESecurity.h>
 #include "Screenshot.h"
+#include "BLE_Link.h"
 
 #define LOG(...) do { if (!screenshot_sending) printf(__VA_ARGS__); } while (0)
 

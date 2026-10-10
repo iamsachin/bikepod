@@ -263,6 +263,9 @@ class Server_Callbacks : public BLEServerCallbacks {
   }
   void onConnect(BLEServer *server, esp_ble_gatts_cb_param_t *param) override {
     Phone_Notify_Connected(param->connect.remote_bda);   // calls and music from the phone
+    // Keep advertising: iOS connects by itself once paired (calls, music), and the BikePod app,
+    // scanning in the background, can only find the pod while it advertises
+    BLEDevice::startAdvertising();
   }
   void onDisconnect(BLEServer *server) override {
     connected = false;

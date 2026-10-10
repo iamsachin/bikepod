@@ -11,6 +11,7 @@
 #include "Pages.h"
 #include "Settings.h"
 #include "Phone_Notify.h"
+#include "Phone_Screens.h"
 #include "Nav_Screen.h"
 #include "Map_Layer.h"
 #include "Lean_Screen.h"
@@ -87,6 +88,7 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "cam") == 0) Map_Layer_Debug_Print();
       else if (strcmp(cmd, "settings") == 0) Settings_Panel_Show(!Settings_Panel_Open());
       else if (strcmp(cmd, "waiting") == 0) Nav_Screen_Show_Waiting();
+      else if (strcmp(cmd, "art") == 0) Album_Art_Debug();
       else if (strncmp(cmd, "fakecall", 8) == 0) Phone_Notify_Fake_Call(cmd[8] ? cmd + 9 : "");
       else if (strncmp(cmd, "fakemusic", 9) == 0) {
         // fakemusic Title|Artist|1

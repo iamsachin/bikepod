@@ -46,6 +46,7 @@ final class PodLink: NSObject {
     private var pod: CBPeripheral?
     private var navChar: CBCharacteristic?
     private var recheck: Timer?
+    private static let savedPodKey = "podIdentifier"
 
     override init() {
         super.init()
@@ -90,6 +91,8 @@ final class PodLink: NSObject {
             let line: String
             if !liveQueue.isEmpty {
                 line = liveQueue.removeFirst().line
+                // Shown in Settings: the short live lines only (not map or album art data), one line
+                lastSent = line.count > 48 ? String(line.prefix(48)) + "…" : line
             } else if !bulkQueue.isEmpty {
                 line = bulkQueue.removeFirst()
             } else {
@@ -101,7 +104,6 @@ final class PodLink: NSObject {
             // A line longer than one packet needs the slower acknowledged "long write"
             let fits = data.count <= pod.maximumWriteValueLength(for: .withoutResponse)
             pod.writeValue(data, for: navChar, type: fits ? .withoutResponse : .withResponse)
-            lastSent = line
         }
     }
 
@@ -142,10 +144,18 @@ final class PodLink: NSObject {
 
 extension PodLink: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state == .poweredOn {
-            startScan()
-        } else {
+        guard central.state == .poweredOn else {
             state = .bluetoothOff
+            return
+        }
+        // The pod we used before: ask iOS to connect to it whenever it's around. Unlike a scan,
+        // this request keeps working while the app is in the background (the phone locked on
+        // the handlebar) and wakes the app when the pod appears.
+        if let saved = UserDefaults.standard.string(forKey: Self.savedPodKey).flatMap(UUID.init(uuidString:)),
+           let known = central.retrievePeripherals(withIdentifiers: [saved]).first {
+            use(known)
+        } else {
+            startScan()
         }
     }
 
@@ -155,6 +165,7 @@ extension PodLink: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.savedPodKey)
         peripheral.discoverServices([Self.serviceUUID])
     }
 
@@ -164,9 +175,9 @@ extension PodLink: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         navChar = nil
-        pod = nil
         clearQueues()
-        startScan()   // the pod restarts advertising, so just look for it again
+        // Ask to reconnect straight away (works in the background, no scan needed)
+        use(peripheral)
     }
 }
 
@@ -178,6 +189,7 @@ extension PodLink: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
               let line = String(data: data, encoding: .utf8) else { return }
+        DebugLog.write("LINK event \(line.prefix(80))")
         onEvent?(line)
     }
 
@@ -190,6 +202,9 @@ extension PodLink: CBPeripheralDelegate {
         navChar = service.characteristics?.first(where: { $0.uuid == Self.navCharUUID })
         if let events = service.characteristics?.first(where: { $0.uuid == Self.eventCharUUID }) {
             peripheral.setNotifyValue(true, for: events)
+            DebugLog.write("LINK events channel found")
+        } else {
+            DebugLog.write("LINK no events channel (characteristics: \(service.characteristics?.map(\.uuid.uuidString) ?? []))")
         }
         if navChar != nil {
             connectionID += 1

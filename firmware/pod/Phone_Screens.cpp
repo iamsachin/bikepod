@@ -99,13 +99,13 @@ static lv_obj_t *Control(lv_obj_t *row, const char *icon, bool main, Media_Comma
 
 /*********************************** Album art ***********************************
  * The phone looks the cover up from the song's title and artist (iOS doesn't share artwork)
- * and sends it as 120x120 RGB565 in base64 parts. Drawn 2x behind the page, darkened so the
+ * and sends it as 120x120 RGB565 in base64 parts. Drawn full screen behind the page, darkened so the
  * text stays readable and fading to black towards the round screen's edge.
  **********************************************************************************/
 #define ART_SIZE        120
 #define ART_PART        360                          // raw bytes per ART line
 #define ART_PARTS       (ART_SIZE * ART_SIZE * 2 / ART_PART)
-#define ART_SHOWN       240                          // drawn at twice the size
+#define ART_SHOWN       480                          // the whole screen (4x)
 
 static uint8_t *art_raw;                             // PSRAM, filled by the Bluetooth task
 static uint8_t art_have[(ART_PARTS + 7) / 8];
@@ -140,12 +140,22 @@ static inline uint16_t Art_Px(int x, int y)
 }
 
 // Enlarged with smoothing, darkened, and faded to black outside a circle
+// Serial "art": what the album art is waiting for
+void Album_Art_Debug(void)
+{
+  int have = 0;
+  for (int i = 0; i < ART_PARTS; i++) if (art_have[i / 8] & (1 << (i % 8))) have++;
+  printf("ART want %u, complete %u, drawn %u, parts %d/%d, buffer %s\r\n", art_id, art_complete, art_drawn,
+         have, ART_PARTS, art_raw ? "ok" : "MISSING");
+}
+
 static void Art_Draw(void)
 {
-  const float brightness = 0.45f, r_full = 66, r_zero = 118;
+  const float brightness = 0.55f, r_full = 150, r_zero = 238;
+  const float scale = (float)ART_SIZE / ART_SHOWN;
   for (int y = 0; y < ART_SHOWN; y++) {
     for (int x = 0; x < ART_SHOWN; x++) {
-      float u = (x + 0.5f) / 2 - 0.5f, v = (y + 0.5f) / 2 - 0.5f;
+      float u = (x + 0.5f) * scale - 0.5f, v = (y + 0.5f) * scale - 0.5f;
       int x0 = (int)floorf(u), y0 = (int)floorf(v);
       float fx = u - x0, fy = v - y0;
       float rgb[3] = { 0, 0, 0 };
@@ -174,7 +184,7 @@ static void Art_Create(lv_obj_t *parent)
   void *buf = heap_caps_malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR(ART_SHOWN, ART_SHOWN), MALLOC_CAP_SPIRAM);
   art_canvas = lv_canvas_create(parent);
   lv_canvas_set_buffer(art_canvas, buf, ART_SHOWN, ART_SHOWN, LV_IMG_CF_TRUE_COLOR);
-  lv_obj_align(art_canvas, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_align(art_canvas, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -186,6 +196,7 @@ static void Art_Request(const Phone_State &s)
   char line[160];
   snprintf(line, sizeof(line), "NOWPLAYING|%u|%s|%s", art_id, s.title, s.artist);
   BLE_Link_Notify(line);
+  printf("ART: asking for %u (%s)\r\n", art_id, s.title);
 }
 
 /********************************* Incoming call *********************************/
