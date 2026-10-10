@@ -15,6 +15,7 @@
 #include "Pages.h"
 #include "Journey_Screen.h"
 #include "Settings.h"
+#include "Clock.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -60,6 +61,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); Nav_Screen_Set_Speed(msg.speed_mps); break;
       case MSG_LIMIT:   Nav_Screen_Set_Limit(msg.speed_kmh); break;
       case MSG_BUMP:    Nav_Screen_Set_Bump(msg.distance_m); break;
+      case MSG_TIME:    Clock_Set(msg.elapsed_s / 3600, msg.elapsed_s / 60 % 60, msg.elapsed_s % 60); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
       case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); Journey_Clear(); break;
@@ -82,6 +84,7 @@ void setup()
   I2C_Init();
   delay(120);                       // ms
   TCA9554PWR_Init(0x00);            // I/O expander: all pins output
+  Clock_Init();                     // real-time clock (set by the phone)
   Set_EXIO(EXIO_PIN8, Low);         // buzzer off
   // Screen on this core (1). Starting it from core 0 put its picture-copying interrupts next to
   // Bluetooth, which delayed them: the picture slipped (the old drift problem) for ~10% speed.

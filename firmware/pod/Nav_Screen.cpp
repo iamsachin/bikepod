@@ -9,6 +9,8 @@
 #include "Map_Layer.h"
 #include "Pages.h"
 #include "Settings.h"
+#include "Clock.h"
+LV_IMG_DECLARE(app_icon);
 #include <esp_heap_caps.h>
 #include <stdio.h>
 #include <math.h>
@@ -58,6 +60,8 @@ static lv_obj_t *stale_veil;
 static lv_obj_t *dbg_glow, *dbg_area, *dbg_marker;   // for serial test commands      // semi-transparent black over everything when the link goes quiet
 
 static lv_obj_t *info_group;      // waiting / rerouting / arrived / cruise
+static lv_obj_t *icon_app;        // the app's icon, on "Waiting for phone"
+static lv_obj_t *wait_clock;      // time, above it (from the pod's own clock)
 static lv_obj_t *icon_target;
 static lv_obj_t *icon_reroute;
 static lv_obj_t *info_top;
@@ -195,9 +199,25 @@ static void Spinner_Tick(lv_timer_t *timer)
   lv_arc_set_angles(spinner, start, start + 70);
 }
 
+/********************************* Waiting clock *********************************/
+static void Wait_Clock_Tick(lv_timer_t *timer)
+{
+  if (mode != MODE_WAITING) {
+    lv_obj_add_flag(wait_clock, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  char text[12];
+  Clock_Text(text, sizeof(text));          // "" when the clock hasn't been set since power-up
+  Set_Text(wait_clock, text);
+  Show_If(wait_clock, text[0]);
+}
+
 /************************************* Icons *************************************/
 static void Icons_Create(lv_obj_t *parent)
 {
+  icon_app = lv_img_create(parent);
+  lv_img_set_src(icon_app, &app_icon);
+
   // Arrived: a red target
   icon_target = Plain_Box(parent, 52, 60);
   lv_obj_t *outer = Plain_Box(icon_target, 48, 48);
@@ -532,6 +552,7 @@ static void Set_Mode(Screen_Mode new_mode)
 static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv_font_t *main_font,
                      const char *sub, const char *detail)
 {
+  Show_If(icon_app, icon == icon_app);
   Show_If(icon_target, icon == icon_target);
   Show_If(icon_reroute, icon == icon_reroute);
   Set_Text(info_top, top);
@@ -656,6 +677,12 @@ void Nav_Screen_Create(void)
   lv_obj_align(eta_label, LV_ALIGN_TOP_MID, 0, 386);
   lv_obj_add_flag(eta_label, LV_OBJ_FLAG_HIDDEN);
 
+  /* Clock on "Waiting for phone" (the pod's own clock, so it works without the phone) */
+  wait_clock = Label_Create(scr, &font_text_32, COLOR_SOFT);
+  lv_obj_align(wait_clock, LV_ALIGN_TOP_MID, 0, 74);
+  lv_obj_add_flag(wait_clock, LV_OBJ_FLAG_HIDDEN);
+  lv_timer_create(Wait_Clock_Tick, 1000, NULL);
+
   /* Info screens */
   info_group = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
   lv_obj_set_flex_flow(info_group, LV_FLEX_FLOW_COLUMN);
@@ -690,7 +717,7 @@ void Nav_Screen_Show_Waiting(void)
   Set_Mode(MODE_WAITING);
   Nav_Screen_Set_Stale(false);
   Ring_Set_Fixed(0);
-  Set_Info(NULL, "", "BikePod", &font_title_44, "Waiting for phone", "");
+  Set_Info(icon_app, "", "BikePod", &font_title_44, "Waiting for phone", "");
 }
 
 void Nav_Screen_Show_Rerouting(void)

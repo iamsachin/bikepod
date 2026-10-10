@@ -34,6 +34,8 @@ final class PodLink: NSObject {
     private(set) var lastSent: String = ""
     /// Goes up by one on every (re)connection, so senders know when the pod needs a full resend
     private(set) var connectionID = 0
+    /// When the current connection was made
+    private(set) var connectedAt = Date.distantPast
 
     private var central: CBCentralManager!
     private var pod: CBPeripheral?
@@ -156,6 +158,7 @@ extension PodLink: CBPeripheralDelegate {
         navChar = service.characteristics?.first(where: { $0.uuid == Self.navCharUUID })
         if navChar != nil {
             connectionID += 1
+            connectedAt = Date()
             state = .connected
         }
     }

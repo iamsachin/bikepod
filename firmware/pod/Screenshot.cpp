@@ -85,6 +85,7 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
       else if (strcmp(cmd, "cam") == 0) Map_Layer_Debug_Print();
       else if (strcmp(cmd, "settings") == 0) Settings_Panel_Show(!Settings_Panel_Open());
+      else if (strcmp(cmd, "waiting") == 0) Nav_Screen_Show_Waiting();
       else if (strcmp(cmd, "camlog") == 0) { extern bool map_cam_log; map_cam_log = !map_cam_log; }
       else if (strcmp(cmd, "bench") == 0) Nav_Screen_Bench();
       else if (strcmp(cmd, "rastbench") == 0) Map_Layer_Raster_Bench();

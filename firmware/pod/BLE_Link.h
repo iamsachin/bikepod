@@ -19,6 +19,7 @@
 //   SPD|123                   GPS speed in tenths of a metre per second (lean estimate, speed shown)
 //   LIMIT|50                  speed limit where the rider is, km/h (0 = not known)
 //   BUMP|85                   metres to the next mapped speed breaker (0 = none close)
+//   TIME|16|32|05             the phone's local time (sets the pod's clock)
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -30,7 +31,7 @@
 #define NAV_PATH_MAX_POINTS   40
 
 enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_ROUTE, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE,
-                MSG_LIMIT, MSG_BUMP };
+                MSG_LIMIT, MSG_BUMP, MSG_TIME };
 
 struct Nav_Message {
   Msg_Kind kind;

@@ -354,7 +354,13 @@ final class Navigator {
 
     /// What the pod should be showing right now, as (kind, line) pairs (see BLE_Link.h on the pod).
     private var podLines: [(kind: String, line: String)] {
-        [("speed", speedLine)] + screenLines
+        [("clock", timeLine), ("speed", speedLine)] + screenLines
+    }
+
+    /// The phone's local time, to set the pod's clock (it keeps time when the phone is away)
+    private var timeLine: String {
+        let c = Calendar.current.dateComponents([.hour, .minute, .second], from: Date())
+        return String(format: "TIME|%02d|%02d|%02d", c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
     }
 
     private var screenLines: [(kind: String, line: String)] {
@@ -397,6 +403,8 @@ final class Navigator {
         for (kind, line) in podLines {
             let last = lastPodSent[kind]
             let age = now.timeIntervalSince(last?.at ?? .distantPast)
+            // The time changes every second: send it on connecting and then every 30 s
+            if kind == "clock", let last, last.at > link.connectedAt, age < 30 { continue }
             let changed = line != last?.line
             let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose") || kind == "speed" || kind == "bump"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
