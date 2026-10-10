@@ -41,7 +41,9 @@ LV_FONT_DECLARE(font_small_26);
 #define LATERAL_AXIS    { 0.0f, 1.0f, 0.0f }     // X turned out to run up the screen (it measured pitch)
 
 #define SAMPLE_MS       10        // 100 readings a second
-#define CAL_SAMPLES     100       // one second still at start-up
+#define CAL_MS          1000      // one second still (by the clock: readings come slower while
+                                  // the map draws, so 100 of them took over 9 s during a ride)
+#define CAL_MIN_SAMPLES 20
 #define MOVING_MPS      3.0f      // above this, trust speed x turn rate; below, trust gravity
 #define PULL_PER_S      2.0f      // how quickly the gyro estimate is pulled to the reference (drift only:
                                   // the gyro itself follows the lean instantly)
@@ -104,11 +106,18 @@ static void Sample(lv_timer_t *timer)
   Vec w = { Gyro.x, Gyro.y, Gyro.z };       // degrees per second
 
   if (!calibrated) {
+    // The gyro's first readings after power-up are junk (a 440 deg/s spike seen on the desk),
+    // and averaged in they gave a bias of -2.5 deg/s: skip the first half second
+    static uint32_t first_ms = 0;
+    if (!first_ms) first_ms = millis();
+    if (millis() - first_ms < 500) return;
+    static uint32_t cal_start_ms = 0;
+    if (cal_count == 0) cal_start_ms = millis();
     acc_sum = { acc_sum.x + a.x, acc_sum.y + a.y, acc_sum.z + a.z };
     gyro_sum = { gyro_sum.x + w.x, gyro_sum.y + w.y, gyro_sum.z + w.z };
-    if (++cal_count < CAL_SAMPLES) return;
+    if (++cal_count < CAL_MIN_SAMPLES || millis() - cal_start_ms < CAL_MS) return;
     // Turned during the second (handlebars, pod handled): measure again, a few times at most
-    Vec mean = Scale(gyro_sum, 1.0f / CAL_SAMPLES);
+    Vec mean = Scale(gyro_sum, 1.0f / cal_count);
     float largest = fmaxf(fabsf(mean.x), fmaxf(fabsf(mean.y), fabsf(mean.z)));
     if (largest > CAL_MAX_MEAN && ++cal_retries <= 10) {
       printf("LEAN: moved while calibrating (%.1f deg/s), again\r\n", largest);
