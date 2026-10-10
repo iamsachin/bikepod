@@ -25,6 +25,14 @@ struct PodTestView: View {
                     }
                 }
                 Section {
+                    Toggle("Voice guidance", isOn: Binding(get: { !navigator.isMuted },
+                                                           set: { navigator.setMuted(!$0) }))
+                } header: {
+                    Text("Navigation")
+                } footer: {
+                    Text("Spoken turn instructions from the phone. Also on the speaker button while navigating.")
+                }
+                Section {
                     Toggle("Simulate rides", isOn: $navigator.simulateRides)
                     if navigator.simulateRides {
                         Picker("Speed", selection: $navigator.simulationSpeed) {
@@ -58,7 +66,7 @@ struct PodTestView: View {
                 }
                 .disabled(!connected)
             }
-            .navigationTitle("Pod & testing")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 Button("Done") { dismiss() }

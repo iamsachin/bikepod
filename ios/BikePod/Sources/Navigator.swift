@@ -34,7 +34,8 @@ final class Navigator {
     private(set) var rerouting = false
     /// Full Ferrostar state, for the in-app navigation map
     private(set) var navState: NavigationState?
-    private(set) var isMuted = false
+    /// Voice guidance: muted unless the rider turned it on (the choice is remembered)
+    private(set) var isMuted = UserDefaults.standard.object(forKey: "voiceMuted") as? Bool ?? true
     /// Stops the automatic pod updates, e.g. while the manual "Pod test" sheet is open
     @ObservationIgnored var podFeedPaused = false
     /// Replay routes with fake GPS instead of following the phone (set in the Pod & testing sheet).
@@ -204,7 +205,12 @@ final class Navigator {
     }
 
     func toggleMute() {
-        isMuted.toggle()
+        setMuted(!isMuted)
+    }
+
+    func setMuted(_ muted: Bool) {
+        isMuted = muted
+        UserDefaults.standard.set(isMuted, forKey: "voiceMuted")
         if let observer = core?.spokenInstructionObserver, observer.isMuted != isMuted {
             observer.toggleMute()
         }

@@ -88,6 +88,11 @@ struct ContentView: View {
                 camera = .boundingBox(route.mapBounds,
                                       edgePadding: UIEdgeInsets(top: 190, left: 40, bottom: 300, right: 40))
             }
+            // Show where you arrived. Following the location instead jumped back to the start after
+            // a simulated ride (its fake GPS stops at the end and the real position takes over)
+            if phase == .arrived, let destination {
+                camera = .center(destination.coordinate, zoom: 16)
+            }
         }
         // A tap you can feel: starting, rerouting, arriving, failing
         .sensoryFeedback(trigger: navigator.phase) { old, new in
@@ -195,7 +200,7 @@ struct ContentView: View {
     private var podButton: some View {
         Button { showPodTest = true } label: { PodPill(link: link) }
             .buttonStyle(.plain)
-            .accessibilityHint("Opens pod status and testing")
+            .accessibilityHint("Opens settings")
     }
 
     /// Home / Work: goes there, or asks for the place the first time. Long-press to change.
