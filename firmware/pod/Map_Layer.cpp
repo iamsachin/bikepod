@@ -47,9 +47,13 @@ struct Map_Area {
   int16_t fuel[MAP_MAX_FUEL][2];
 };
 
-static Map_Area areas[2];
+// Three buffers, so a new area can always start: one on screen, one complete and waiting to be
+// swapped in, one being filled (with two, an area arriving right after another was dropped).
+// In PSRAM: drawing reads them once per frame (Prepare_Screen_Points), and internal RAM is for Bluetooth.
+#define AREA_BUFFERS 3
+static Map_Area *areas = NULL;
 static Map_Area *volatile active = NULL;      // being drawn (main loop only)
-static Map_Area *volatile building = &areas[0];
+static Map_Area *volatile building = NULL;    // being filled by the Bluetooth task
 static Map_Area *volatile ready = NULL;       // complete, waiting for the main loop to swap in
 static portMUX_TYPE map_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -156,8 +160,13 @@ static void Refresh_Pose(void);
 void Map_Data_Begin(uint16_t area_id, double ref_lat, double ref_lng)
 {
   Ref_Store(area_id, ref_lat, ref_lng);
+  if (!areas) return;
   portENTER_CRITICAL(&map_lock);
-  Map_Area *a = building;
+  // Any buffer that's neither on screen nor waiting to be (an unfinished area is abandoned)
+  Map_Area *a = NULL;
+  for (int i = 0; i < AREA_BUFFERS && !a; i++)
+    if (&areas[i] != active && &areas[i] != ready) a = &areas[i];
+  building = a;
   if (a) {
     a->id = area_id;
     a->road_count = a->point_count = 0;
@@ -983,11 +992,8 @@ void Map_Layer_Poll(void)
   Map_Area *next = ready;
   if (next) {
     ready = NULL;
-    Map_Area *old = active;
-    active = next;
+    active = next;                            // the old one is free for the next area
     screen_key.area = NULL;                   // screen points belong to the old area
-    building = old ? old : (next == &areas[0] ? &areas[1] : &areas[0]);
-    building->id = 0xFFFF;                    // so the next MAP line starts a fresh area
   }
   portEXIT_CRITICAL(&map_lock);
   if (next) {
@@ -1048,7 +1054,8 @@ lv_obj_t *Map_Layer_Create(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coor
   center_y = marker_y;
   screen_pts = (Pt *)heap_caps_malloc(MAP_MAX_POINTS * sizeof(Pt), MALLOC_CAP_SPIRAM);
   screen_box = (Road_Box *)heap_caps_malloc(MAP_MAX_ROADS * sizeof(Road_Box), MALLOC_CAP_SPIRAM);
-  areas[0].id = areas[1].id = 0xFFFF;
+  areas = (Map_Area *)heap_caps_calloc(AREA_BUFFERS, sizeof(Map_Area), MALLOC_CAP_SPIRAM);
+  for (int i = 0; areas && i < AREA_BUFFERS; i++) areas[i].id = 0xFFFF;
   lv_timer_create(Frame, FRAME_MS, NULL);
   return layer;
 }
