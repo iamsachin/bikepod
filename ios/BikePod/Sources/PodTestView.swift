@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The step 4a manual controls: send turns to the pod by hand, or play a fake approach.
+/// Pod status, ride simulation, and manual controls: send turns to the pod by hand, or play a
+/// fake approach.
 struct PodTestView: View {
     let link: PodLink
+    @Bindable var navigator: Navigator
     @Environment(\.dismiss) private var dismiss
 
     @State private var dir: TurnDir = .right
@@ -21,6 +23,21 @@ struct PodTestView: View {
                         LabeledContent("Last sent", value: link.lastSent)
                             .font(.footnote.monospaced())
                     }
+                }
+                Section {
+                    Toggle("Simulate rides", isOn: $navigator.simulateRides)
+                    if navigator.simulateRides {
+                        Picker("Speed", selection: $navigator.simulationSpeed) {
+                            Text("1×").tag(UInt64(1))
+                            Text("4×").tag(UInt64(4))
+                            Text("10×").tag(UInt64(10))
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                } header: {
+                    Text("Ride simulation")
+                } footer: {
+                    Text("Replays the route with fake GPS, for testing at a desk. Turns off when the app restarts.")
                 }
                 Section("Manual test") {
                     Picker("Direction", selection: $dir) {
@@ -41,7 +58,7 @@ struct PodTestView: View {
                 }
                 .disabled(!connected)
             }
-            .navigationTitle("Pod test")
+            .navigationTitle("Pod & testing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 Button("Done") { dismiss() }
@@ -68,6 +85,29 @@ struct PodTestView: View {
     private func stopApproach() {
         approach?.cancel()
         approach = nil
+    }
+}
+
+/// "● BikePod  Connected" as a small capsule, for the map screens
+struct PodPill: View {
+    let link: PodLink
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(link.state == .connected ? Color.green : Color.orange)
+                .frame(width: 8, height: 8)
+            Text("BikePod").fontWeight(.semibold)
+            Text(link.state == .connected ? "Connected" : link.state == .bluetoothOff ? "Bluetooth off" : "Searching…")
+                .foregroundStyle(.secondary)
+        }
+        .font(.footnote)
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 }
 

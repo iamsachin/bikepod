@@ -37,13 +37,22 @@ final class Navigator {
     private(set) var isMuted = false
     /// Stops the automatic pod updates, e.g. while the manual "Pod test" sheet is open
     @ObservationIgnored var podFeedPaused = false
+    /// Replay routes with fake GPS instead of following the phone (set in the Pod & testing sheet).
+    /// Off at every launch, so a real ride never starts as a simulation by mistake.
+    var simulateRides = false
+    var simulationSpeed: UInt64 = 4
+    /// The finished trip, for the Arrived card
+    private(set) var lastTrip: (km: Double, seconds: TimeInterval)?
 
-    var hasGPS: Bool { device.lastLocation != nil }
-    var currentCoordinate: CLLocationCoordinate2D? { device.lastLocation?.clLocation.coordinate }
+    /// Updated as fixes arrive (reading the provider directly didn't refresh the screen)
+    private(set) var hasGPS = false
+    var currentCoordinate: CLLocationCoordinate2D? { device?.lastLocation?.clLocation.coordinate }
 
     private let link: PodLink
-    private let device = CoreLocationProvider(activityType: .automotiveNavigation,
-                                              allowBackgroundLocationUpdates: true)
+    /// Created by activate(), after the first screen is up: setting it up asks the system for the
+    /// location permission and waits for the answer, which held the whole UI at launch
+    @ObservationIgnored private var device: CoreLocationProvider?
+    @ObservationIgnored private var gpsWatch: AnyCancellable?
     private let simulated = SimulatedLocationProvider()
     private var core: FerrostarCore?
     @ObservationIgnored private var stateWatch: AnyCancellable?
@@ -66,7 +75,6 @@ final class Navigator {
 
     init(link: PodLink) {
         self.link = link
-        device.startUpdating()   // also triggers the location permission prompt
         podFeed = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -74,6 +82,19 @@ final class Navigator {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// Starts following the phone's GPS (call once the first screen is showing)
+    func activate() {
+        guard device == nil else { return }
+        let device = CoreLocationProvider(activityType: .automotiveNavigation, allowBackgroundLocationUpdates: true)
+        device.startUpdating()   // also triggers the location permission prompt
+        self.device = device
+        gpsWatch = device.$lastLocation
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] location in
+                if self?.hasGPS != (location != nil) { self?.hasGPS = location != nil }
+            }
     }
 
     private static let config = SwiftNavigationControllerConfig(
@@ -107,7 +128,7 @@ final class Navigator {
         let origin: UserLocation
         if let start {
             origin = UserLocation(clCoordinateLocation2D: start)
-        } else if let here = device.lastLocation {
+        } else if let here = device?.lastLocation {
             origin = here
         } else {
             phase = .failed("No GPS position yet. Wait a few seconds and try again.")
@@ -119,7 +140,7 @@ final class Navigator {
         let requestID = UUID()
         routeRequestID = requestID
         do {
-            let router = try makeCore(device)
+            let router = try makeCore(device ?? simulated)   // only asks for routes: no GPS needed
             let routes = try await router.getRoutes(
                 initialLocation: origin,
                 waypoints: [Waypoint(coordinate: GeographicCoordinate(lat: destination.latitude,
@@ -137,21 +158,26 @@ final class Navigator {
             if let first = route.geometry.first { mapFeed.prefetch(lat: first.lat, lng: first.lng) }
         } catch {
             guard routeRequestID == requestID else { return }
-            phase = .failed("Routing failed: \(error.localizedDescription)")
+            phase = .failed(Self.friendlyMessage(error))
         }
     }
 
-    /// Step 2: start guidance on the previewed route.
-    /// - Parameters:
-    ///   - simulate: replay the route with fake GPS instead of riding it
-    ///   - speedUp: simulation speed multiplier (1 = about 36 km/h)
-    func startNavigation(simulate: Bool, speedUp: UInt64) {
+    /// True when starting the previewed route would replay it instead of following the GPS
+    var willSimulate: Bool { simulateRides || routeStartsElsewhere }
+
+    /// Step 2: start guidance on the previewed route (simulated if `willSimulate`;
+    /// `simulationSpeed` 1 = about 36 km/h)
+    func startNavigation() {
         guard case let .preview(route) = phase else { return }
-        let simulate = simulate || routeStartsElsewhere
+        let simulate = willSimulate
         do {
-            let core = try makeCore(simulate ? simulated : device)
+            guard let provider: LocationProviding = simulate ? simulated : device else {
+                phase = .failed("No GPS yet. Wait a few seconds and try again.")
+                return
+            }
+            let core = try makeCore(provider)
             if simulate {
-                simulated.warpFactor = max(1, speedUp)
+                simulated.warpFactor = max(1, simulationSpeed)
                 // One simulated GPS point every 10 m, once per second (divided by the speed-up)
                 try simulated.setSimulatedRoute(route, resampleDistance: 10)
             }
@@ -165,6 +191,7 @@ final class Navigator {
             try core.startNavigation(route: route)
             tripStartedAt = Date()
             tripKm = route.distance / 1000
+            lastTrip = nil
             turnLine = ""
             tripLine = ""
             pathLine = ""
@@ -203,6 +230,9 @@ final class Navigator {
         rerouting = state.isCalculatingNewRoute
 
         if case .complete = state.tripState {
+            if phase != .arrived {
+                lastTrip = (tripKm, Date().timeIntervalSince(tripStartedAt))
+            }
             phase = .arrived
             updatePod()
             return
@@ -261,7 +291,7 @@ final class Navigator {
     /// GPS speed for the pod's lean estimate, in tenths of a metre per second (simulated rides
     /// report the simulated speed)
     private var speedLine: String {
-        let location = phase == .navigating ? navState?.preferredUserLocation : device.lastLocation
+        let location = phase == .navigating ? navState?.preferredUserLocation : device?.lastLocation
         let metresPerSecond = max(0, location?.speed?.value ?? 0)
         return "SPD|\(Int((metresPerSecond * 10).rounded()))"
     }
@@ -285,7 +315,7 @@ final class Navigator {
             let place = Self.podText(destinationName)
             return [("state", String(format: "ARRIVED|%.1f|%d|", tripKm, minutes) + place)]
         case .idle, .routing, .preview, .failed:
-            let metresPerSecond = max(0, device.lastLocation?.speed?.value ?? 0)
+            let metresPerSecond = max(0, device?.lastLocation?.speed?.value ?? 0)
             let speed = Int((metresPerSecond * 3.6).rounded())
             return [("state", "CRUISE|\(speed)|\(Self.clockFormat.string(from: Date()))")]
         }
@@ -316,6 +346,22 @@ final class Navigator {
             lastPodSent[kind] = (line, now)
             link.send(line: line, kind: kind)
         }
+    }
+
+    /// A routing error in plain words
+    static func friendlyMessage(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            switch URLError.Code(rawValue: ns.code) {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+                return "No internet connection. Check your signal and try again."
+            case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return "The route server didn't answer. Try again in a moment."
+            default:
+                break
+            }
+        }
+        return "Couldn't get a route. \(error.localizedDescription)"
     }
 
     /// The pod only draws left / right / straight arrows for now.

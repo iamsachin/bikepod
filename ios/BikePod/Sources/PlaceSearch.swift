@@ -8,10 +8,63 @@ struct Place: Identifiable, Hashable, Codable {
     let detail: String
     let latitude: Double
     let longitude: Double
+    /// OpenStreetMap type, e.g. "amenity=fuel" (nil for places saved before this was kept)
+    var kind: String? = nil
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+
+    /// SF Symbol for the kind of place
+    var symbol: String {
+        guard let kind else { return "mappin.circle" }
+        let value = kind.split(separator: "=").last.map(String.init) ?? ""
+        switch value {
+        case "fuel", "charging_station": return "fuelpump.circle"
+        case "restaurant", "cafe", "fast_food", "food_court", "bar", "pub": return "fork.knife.circle"
+        case "hospital", "clinic", "doctors", "pharmacy": return "cross.circle"
+        case "hotel", "guest_house", "hostel", "motel": return "bed.double.circle"
+        case "park", "garden", "nature_reserve", "lake", "water": return "leaf.circle"
+        case "school", "college", "university": return "graduationcap.circle"
+        case "station", "bus_station", "bus_stop", "halt": return "tram.circle"
+        case "aerodrome", "airport": return "airplane.circle"
+        case "mall", "supermarket", "marketplace": return "bag.circle"
+        default: break
+        }
+        if kind.hasPrefix("highway=") { return "signpost.right.circle" }
+        if kind.hasPrefix("shop=") { return "bag.circle" }
+        if kind.hasPrefix("place=") || kind.hasPrefix("boundary=") { return "building.2.crop.circle" }
+        return "mappin.circle"
+    }
+}
+
+/// Home and Work, kept on the phone between launches.
+@MainActor
+@Observable
+final class SavedPlaces {
+    enum Slot: String, CaseIterable, Identifiable {
+        case home = "Home", work = "Work"
+        var id: String { rawValue }
+        var symbol: String { self == .home ? "house.fill" : "briefcase.fill" }
+    }
+
+    private(set) var places: [Slot: Place] = [:]
+
+    init() {
+        for slot in Slot.allCases {
+            if let data = UserDefaults.standard.data(forKey: Self.key(slot)),
+               let place = try? JSONDecoder().decode(Place.self, from: data) {
+                places[slot] = place
+            }
+        }
+    }
+
+    func set(_ slot: Slot, to place: Place?) {
+        places[slot] = place
+        UserDefaults.standard.set(place.flatMap { try? JSONEncoder().encode($0) }, forKey: Self.key(slot))
+    }
+
+    private static func key(_ slot: Slot) -> String { "savedPlace.\(slot.rawValue)" }
 }
 
 /// Places picked from search, newest first, kept on the phone between launches.
@@ -112,7 +165,8 @@ final class PlaceSearch {
                          name: name,
                          detail: detail,
                          latitude: feature.geometry.coordinates[1],
-                         longitude: feature.geometry.coordinates[0])
+                         longitude: feature.geometry.coordinates[0],
+                         kind: p.osm_key.map { "\($0)=\(p.osm_value ?? "")" })
         }
     }
 }
@@ -128,6 +182,8 @@ private struct PhotonResponse: Decodable {
             let city: String?
             let osm_type: String?
             let osm_id: Int?
+            let osm_key: String?
+            let osm_value: String?
         }
         let geometry: Geometry
         let properties: Properties
