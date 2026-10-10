@@ -667,6 +667,8 @@ void Nav_Screen_Create(void)
   limit_label = Label_Create(limit_sign, &font_text_32, lv_color_black());
   lv_obj_center(limit_label);
   lv_obj_add_flag(limit_sign, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(speed_label, LV_OBJ_FLAG_HIDDEN);   // shown with a speed limit (Nav_Screen_Set_Limit)
+  lv_obj_add_flag(speed_unit, LV_OBJ_FLAG_HIDDEN);
   Nav_Screen_Set_Speed(0);
 
   /* Shared bottom line: arrival time and distance left */
@@ -799,6 +801,9 @@ void Nav_Screen_Set_Limit(uint32_t kmh)
     lv_obj_center(limit_label);
   }
   Show_If(limit_sign, kmh > 0);
+  // Speed only alongside a limit: on its own it isn't needed (the phone shows it)
+  Show_If(speed_label, kmh > 0);
+  Show_If(speed_unit, kmh > 0);
   Update_Speed_Colour();
 }
 
