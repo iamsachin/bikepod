@@ -16,6 +16,7 @@
 #include "Journey_Screen.h"
 #include "Settings.h"
 #include "Clock.h"
+#include "Battery.h"
 #include "Phone_Screens.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
@@ -86,6 +87,7 @@ void setup()
   delay(120);                       // ms
   TCA9554PWR_Init(0x00);            // I/O expander: all pins output
   Clock_Init();                     // real-time clock (set by the phone)
+  Battery_Init();
   Set_EXIO(EXIO_PIN8, Low);         // buzzer off
   // Screen on this core (1). Starting it from core 0 put its picture-copying interrupts next to
   // Bluetooth, which delayed them: the picture slipped (the old drift problem) for ~10% speed.
@@ -136,6 +138,7 @@ static void Perf_Measure(uint32_t us)
 
 void loop()
 {
+  Battery_Update();
   uint32_t start = micros();
   Lvgl_Loop();
   Perf_Measure(micros() - start);
