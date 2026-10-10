@@ -16,7 +16,6 @@
 #include "Journey_Screen.h"
 #include "Settings.h"
 #include "Clock.h"
-#include "Battery.h"
 #include "Status_Bar.h"
 #include "Phone_Screens.h"
 
@@ -88,7 +87,6 @@ void setup()
   delay(120);                       // ms
   TCA9554PWR_Init(0x00);            // I/O expander: all pins output
   Clock_Init();                     // real-time clock (set by the phone)
-  Battery_Init();
   Set_EXIO(EXIO_PIN8, Low);         // buzzer off
   // Screen on this core (1). Starting it from core 0 put its picture-copying interrupts next to
   // Bluetooth, which delayed them: the picture slipped (the old drift problem) for ~10% speed.
@@ -98,7 +96,7 @@ void setup()
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
-  Status_Bar_Create();              // music + battery row (under the call overlay)
+  Status_Bar_Create();              // music row (under the call overlay)
   Phone_Screens_Create(lv_scr_act());    // now playing (swipe right from navigation); incoming calls
   Journey_Screen_Create(lv_scr_act());   // swipe right again
   Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
@@ -140,7 +138,6 @@ static void Perf_Measure(uint32_t us)
 
 void loop()
 {
-  Battery_Update();
   uint32_t start = micros();
   Lvgl_Loop();
   Perf_Measure(micros() - start);

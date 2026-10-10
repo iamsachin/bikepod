@@ -27,6 +27,13 @@ final class PodLink: NSObject {
 
     @ObservationIgnored private var eventHandlers: [(String) -> Void] = []
 
+    @ObservationIgnored private var connectHandlers: [() -> Void] = []
+
+    /// Calls `handler` (on the main queue) each time the pod is connected and ready for lines
+    func onConnected(_ handler: @escaping () -> Void) {
+        connectHandlers.append(handler)
+    }
+
     /// Calls `handler` (on the main queue) with each line the pod sends (NOWPLAYING, LEAN, ...)
     func onEvent(_ handler: @escaping (String) -> Void) {
         eventHandlers.append(handler)
@@ -43,10 +50,6 @@ final class PodLink: NSObject {
     private(set) var lastSent: String = ""
     /// Goes up by one on every (re)connection, so senders know when the pod needs a full resend
     private(set) var connectionID = 0
-    /// The pod's battery, 0-100, as it last reported it (nil until it does, or when not connected)
-    private(set) var podBattery: Int?
-    /// The pod is on its charger (it works this out from the battery voltage)
-    private(set) var podCharging = false
     /// When the current connection was made
     private(set) var connectedAt = Date.distantPast
 
@@ -183,8 +186,6 @@ extension PodLink: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         navChar = nil
-        podBattery = nil
-        podCharging = false
         clearQueues()
         // Ask to reconnect straight away (works in the background, no scan needed)
         use(peripheral)
@@ -199,13 +200,6 @@ extension PodLink: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
               let line = String(data: data, encoding: .utf8) else { return }
-        if line.hasPrefix("BATTERY|") {                       // BATTERY|78|3.912|0 (percent, volts, charging)
-            let fields = line.split(separator: "|")
-            if fields.count >= 2 { podBattery = Int(fields[1]) }
-            podCharging = fields.count >= 4 && fields[3] == "1"
-            DebugLog.write("POD battery \(fields.dropFirst().joined(separator: " % "))V")   // for calibrating the curve
-            return
-        }
         if !line.hasPrefix("LEAN|") { DebugLog.write("LINK event \(line.prefix(80))") }   // LEAN: every 2 s
         for handler in eventHandlers { handler(line) }
     }
@@ -227,6 +221,7 @@ extension PodLink: CBPeripheralDelegate {
             connectionID += 1
             connectedAt = Date()
             state = .connected
+            for handler in connectHandlers { handler() }
         }
     }
 }

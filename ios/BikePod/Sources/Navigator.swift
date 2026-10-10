@@ -69,6 +69,9 @@ final class Navigator {
     @ObservationIgnored private var pathLine = ""          // latest "RPATH|..." route for the pod's map
     @ObservationIgnored private var poseLine = ""          // latest "POSE|..." rider in the map area
     @ObservationIgnored private var mapSentForConnection = -1
+    /// The connection the lines in lastPodSent went over: a new one (the pod restarted after the
+    /// bike's power came back, or reconnected) gets everything again at once
+    @ObservationIgnored private var linesSentForConnection = -1
     private let mapFeed = MapFeed()
     private let hazards = Hazards()
     @ObservationIgnored private var limitLine = ""         // latest "LIMIT|50" (0 = not known here)
@@ -97,6 +100,9 @@ final class Navigator {
             Task { @MainActor in self?.online = online }
         }
         network.start(queue: .global(qos: .utility))
+        // A pod that has just (re)connected, e.g. restarted when the bike's power came back:
+        // bring it up to date now rather than at the next 1 s update
+        link.onConnected { [weak self] in self?.updatePod() }
         // The pod's deepest lean in the last 2 s, for the ride history
         link.onEvent { [weak self] line in
             let fields = line.split(separator: "|")
@@ -448,6 +454,10 @@ final class Navigator {
         guard !podFeedPaused else { return }
         if phase == .navigating, !mapFeed.areaLines.isEmpty, mapSentForConnection != link.connectionID {
             sendMapArea(mapFeed.areaLines)          // the pod reconnected (or restarted): it has no map
+        }
+        if link.connectionID != linesSentForConnection {
+            linesSentForConnection = link.connectionID
+            lastPodSent.removeAll()
         }
         let now = Date()
         for (kind, line) in podLines {

@@ -5,11 +5,11 @@
 // short history graph, from the board's QMI8658 motion sensor plus GPS speed from the phone.
 // Lean and g are estimates for interest, not a safety aid.
 
-// Creates the screen (hidden) on top of `parent`; starts the motion sensor and calibrates it,
-// so keep the pod still for the first second after power-on.
+// Creates the screen (hidden) on top of `parent`; starts the motion sensor and measures the
+// gyro's bias over the first still second (any tilt: the mounting is saved, see Lean_Calibrate)
 void Lean_Screen_Create(lv_obj_t *parent);
 void Lean_Screen_Show(bool show);
 // Ground speed from the phone's GPS, metres per second (0 if unknown)
 void Lean_Set_Speed(float metres_per_second);
-// Re-measures which way is down (pod still, bike upright) and clears the session's maximums
+// Re-measures and saves which way is up (pod still, bike upright) and clears the maximums
 void Lean_Calibrate(void);

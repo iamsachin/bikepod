@@ -140,7 +140,7 @@ void Settings_Panel_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
   lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
-  // (The top shows the battery, from the status row above the panel)
+  Caption(panel, "SETTINGS", 62, COLOR_GREY);
 
   Caption(panel, "Clock", 112, COLOR_DIM);
   lv_obj_t *row = Row(panel, 146, 290);

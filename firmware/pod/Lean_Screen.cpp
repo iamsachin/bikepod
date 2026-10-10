@@ -3,8 +3,11 @@
   | help        :   Lean angle from the QMI8658 motion sensor (see Lean_Screen.h).
 
   How the lean is estimated:
-  - At start-up the pod sits still for a second: the average accelerometer reading is "up",
-    and the average gyro reading is its bias (subtracted from then on).
+  - "Up" (how the pod is mounted) is the average accelerometer reading over a second held still
+    and upright: measured on "Calibrate lean" (or the very first start) and saved, since the pod
+    restarts whenever the bike's power goes off and may then be standing on its side stand.
+  - At every start the pod measures the gyro's bias over a second still (subtracted from then
+    on); that works at any tilt. If it is moving meanwhile, it measures again.
   - The gyro's rotation about the bike's forward axis is integrated: fast and smooth, but it drifts.
   - It is pulled gently towards a reference that doesn't drift:
       moving:  lean = atan(speed x turn rate / g)  (what a balanced bike in a turn must lean)
@@ -18,6 +21,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include "Gyro_QMI8658.h"
+#include <Preferences.h>
 #include "Pages.h"
 
 LV_FONT_DECLARE(font_big_104);
@@ -58,6 +62,12 @@ static int cal_count = 0;
 static Vec acc_sum, gyro_sum;
 static Vec up, lateral, forward, gyro_bias;
 static bool calibrated = false;
+static bool measure_up = true;    // false: "up" was loaded from the saved calibration
+static int cal_retries = 0;
+// Average rotation over the calibration second above this = the pod was turned meanwhile. (Single
+// readings are no guide: still on a desk they jump by 25-30 deg/s; the average comes out ~0.2.)
+#define CAL_MAX_MEAN    3.0f      // deg/s
+static Preferences lean_prefs;
 static float tilt_deg = 0;
 static float lean = 0;            // degrees, + = right
 static float lat_g = 0;           // + = to the right
@@ -97,15 +107,31 @@ static void Sample(lv_timer_t *timer)
     acc_sum = { acc_sum.x + a.x, acc_sum.y + a.y, acc_sum.z + a.z };
     gyro_sum = { gyro_sum.x + w.x, gyro_sum.y + w.y, gyro_sum.z + w.z };
     if (++cal_count < CAL_SAMPLES) return;
-    up = Unit(acc_sum);
-    gyro_bias = Scale(gyro_sum, 1.0f / CAL_SAMPLES);
+    // Turned during the second (handlebars, pod handled): measure again, a few times at most
+    Vec mean = Scale(gyro_sum, 1.0f / CAL_SAMPLES);
+    float largest = fmaxf(fabsf(mean.x), fmaxf(fabsf(mean.y), fabsf(mean.z)));
+    if (largest > CAL_MAX_MEAN && ++cal_retries <= 10) {
+      printf("LEAN: moved while calibrating (%.1f deg/s), again\r\n", largest);
+      cal_count = 0;
+      acc_sum = gyro_sum = { 0, 0, 0 };
+      return;
+    }
+    cal_retries = 0;
+    if (measure_up) {
+      up = Unit(acc_sum);
+      lean_prefs.putFloat("ux", up.x);
+      lean_prefs.putFloat("uy", up.y);
+      lean_prefs.putFloat("uz", up.z);
+      measure_up = false;
+    }
+    gyro_bias = mean;
     Vec l = LATERAL_AXIS;
     lateral = Unit(Sub(l, Scale(up, Dot(l, up))));     // horizontal, to the right
     forward = Cross(up, lateral);                      // right-handed: up x right = forward
     tilt_deg = acosf(fminf(1, fabsf(up.z))) * 180 / (float)M_PI;   // screen face vs. horizontal
     lean = 0;
     calibrated = true;
-    printf("LEAN: calibrated, tilt %.0f deg\r\n", tilt_deg);
+    printf("LEAN: calibrated, tilt %.0f deg, gyro bias %.2f %.2f %.2f\r\n", tilt_deg, gyro_bias.x, gyro_bias.y, gyro_bias.z);
     return;
   }
 
@@ -169,6 +195,7 @@ void Lean_Set_Speed(float metres_per_second)
 
 void Lean_Calibrate(void)
 {
+  measure_up = true;                  // the rider asked: the bike is upright now
   calibrated = false;
   cal_count = 0;
   acc_sum = gyro_sum = { 0, 0, 0 };
@@ -334,6 +361,14 @@ static lv_obj_t *Stat(lv_obj_t *row, const char *caption, lv_color_t value_color
 
 void Lean_Screen_Create(lv_obj_t *parent)
 {
+  // The saved mounting ("up"), if calibrated before
+  lean_prefs.begin("lean", false);
+  if (lean_prefs.isKey("ux")) {
+    up = Unit({ lean_prefs.getFloat("ux"), lean_prefs.getFloat("uy"), lean_prefs.getFloat("uz") });
+    measure_up = false;
+    printf("LEAN: saved mounting %.2f %.2f %.2f\r\n", up.x, up.y, up.z);
+  }
+
   root = Box(parent, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_bg_color(root, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);

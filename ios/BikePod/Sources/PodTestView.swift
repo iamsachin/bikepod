@@ -108,9 +108,6 @@ struct PodPill: View {
             Text("BikePod").fontWeight(.semibold)
             Text(link.state == .connected ? "Connected" : link.state == .bluetoothOff ? "Bluetooth off" : "Searching…")
                 .foregroundStyle(.secondary)
-            if link.state == .connected, let battery = link.podBattery {
-                PodBatteryLabel(percent: battery, charging: link.podCharging)
-            }
         }
         .font(.footnote)
         .lineLimit(1)
@@ -131,37 +128,7 @@ struct PodStatusLabel: View {
                 .fill(link.state == .connected ? .green : .orange)
                 .frame(width: 8, height: 8)
             Text(link.state == .connected ? "Pod connected" : link.state.rawValue)
-            if link.state == .connected, let battery = link.podBattery {
-                Spacer()
-                PodBatteryLabel(percent: battery, charging: link.podCharging)
-            }
         }
     }
 }
 
-/// The pod's battery: an icon by level and the percentage, orange when low, red when nearly empty,
-/// green with a bolt while charging
-struct PodBatteryLabel: View {
-    let percent: Int
-    let charging: Bool
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: symbol)
-            Text("\(percent)%").monospacedDigit()
-        }
-        .foregroundStyle(charging ? Color.green : percent <= 10 ? Color.red : percent <= 20 ? Color.orange : Color.secondary)
-        .accessibilityLabel("Pod battery \(percent) percent\(charging ? ", charging" : "")")
-    }
-
-    private var symbol: String {
-        if charging { return "battery.100percent.bolt" }
-        return switch percent {
-        case ..<13: "battery.0percent"
-        case ..<38: "battery.25percent"
-        case ..<63: "battery.50percent"
-        case ..<88: "battery.75percent"
-        default: "battery.100percent"
-        }
-    }
-}

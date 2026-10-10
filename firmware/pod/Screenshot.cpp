@@ -17,7 +17,6 @@
 #include "Lean_Screen.h"
 #include "Gyro_QMI8658.h"
 #include <lvgl.h>
-#include "Battery.h"
 
 volatile bool screenshot_sending = false;
 bool perf_report = false;
@@ -81,9 +80,6 @@ void Screenshot_Poll(void)
     if (c == '\n' || c == '\r') {
       cmd[len] = 0;
       if (strcmp(cmd, "shot") == 0) Screenshot_Send();
-      else if (strncmp(cmd, "batfake ", 8) == 0) Battery_Fake(atoi(cmd + 8), strchr(cmd + 8, 'c') != NULL);
-      else if (strcmp(cmd, "batlog") == 0) Battery_Print_History();
-      else if (strcmp(cmd, "bat") == 0) printf("BAT %.3f V, %d%%%s\r\n", Battery_Volts(), Battery_Percent(), Battery_Charging() ? ", charging" : "");
       else if (strncmp(cmd, "msg ", 4) == 0) BLE_Link_Inject(String(cmd + 4));
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
