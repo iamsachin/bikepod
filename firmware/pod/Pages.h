@@ -2,8 +2,9 @@
 
 #include <lvgl.h>
 
-// Screens you swipe between: 0 = navigation, 1 = lean, 2 = journey, 3 = music, round in a circle.
-// Swipe left for the next screen, right to go back (like a phone; the dots read left to right).
+// Screens you swipe between, in this order and round in a circle. Swipe left for the next
+// screen, right to go back (like a phone; the dots read left to right).
+enum Page { PAGE_NAV, PAGE_LEAN, PAGE_ACCEL, PAGE_JOURNEY, PAGE_MUSIC, PAGE_COUNT };
 void Pages_Init(void);
 void Pages_Show(int page);
 int Pages_Current(void);

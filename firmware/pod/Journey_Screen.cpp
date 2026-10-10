@@ -170,7 +170,7 @@ void Journey_Screen_Create(lv_obj_t *parent)
   lv_label_set_text(none_label, "No trip");
   lv_obj_center(none_label);
 
-  Pages_Add_Dots(root, 2);
+  Pages_Add_Dots(root, PAGE_JOURNEY);
   lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
   lv_timer_create(Refresh, 1000, NULL);
 }

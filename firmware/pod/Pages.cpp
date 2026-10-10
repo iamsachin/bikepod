@@ -9,8 +9,8 @@
 #include "Map_Layer.h"
 #include "Settings.h"
 #include "Phone_Screens.h"
+#include "Accel_Screen.h"
 
-#define PAGE_COUNT 4
 
 static int page = 0;
 
@@ -18,10 +18,11 @@ void Pages_Show(int new_page)
 {
   if (new_page < 0 || new_page >= PAGE_COUNT || new_page == page) return;
   page = new_page;
-  Lean_Screen_Show(page == 1);
-  Journey_Screen_Show(page == 2);
-  Music_Screen_Show(page == 3);
-  Map_Layer_Set_Visible(page == 0);
+  Lean_Screen_Show(page == PAGE_LEAN);
+  Accel_Screen_Show(page == PAGE_ACCEL);
+  Journey_Screen_Show(page == PAGE_JOURNEY);
+  Music_Screen_Show(page == PAGE_MUSIC);
+  Map_Layer_Set_Visible(page == PAGE_NAV);
 }
 
 int Pages_Current(void)
@@ -31,7 +32,7 @@ int Pages_Current(void)
 
 bool Pages_Nav_Visible(void)
 {
-  return page == 0 && !Settings_Panel_Open() && !Call_Screen_Showing();
+  return page == PAGE_NAV && !Settings_Panel_Open() && !Call_Screen_Showing();
 }
 
 // Swipe left/right between pages; down from the top opens settings, up closes them

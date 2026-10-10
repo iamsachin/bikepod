@@ -325,7 +325,7 @@ static void Music_Create(lv_obj_t *parent)
   lv_label_set_text(music_none, "Nothing playing");
   lv_obj_center(music_none);
 
-  Pages_Add_Dots(music_root, 3);
+  Pages_Add_Dots(music_root, PAGE_MUSIC);
   lv_obj_add_flag(music_root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -391,7 +391,7 @@ static lv_obj_t *note_btn;
 
 static void Note_Click(lv_event_t *e)
 {
-  Pages_Show(3);
+  Pages_Show(PAGE_MUSIC);
 }
 
 static void Note_Create(void)
@@ -408,7 +408,7 @@ static void Note_Create(void)
 
 static void Note_Update(const Phone_State &s)
 {
-  bool show = s.media_playing && s.title[0] && Pages_Current() != 3 && !Settings_Panel_Open() && !s.call_ringing;
+  bool show = s.media_playing && s.title[0] && Pages_Current() != PAGE_MUSIC && !Settings_Panel_Open() && !s.call_ringing;
   if (show == lv_obj_has_flag(note_btn, LV_OBJ_FLAG_HIDDEN)) Show_If(note_btn, show);
 }
 

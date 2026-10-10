@@ -17,6 +17,7 @@
 #include "Settings.h"
 #include "Clock.h"
 #include "Status_Bar.h"
+#include "Accel_Screen.h"
 #include "Phone_Screens.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
@@ -100,6 +101,7 @@ void setup()
   Phone_Screens_Create(lv_scr_act());    // now playing (swipe right from navigation); incoming calls
   Journey_Screen_Create(lv_scr_act());   // swipe right again
   Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
+  Accel_Screen_Create(lv_scr_act()); // after lean: uses its motion sensor readings
   Settings_Panel_Create(lv_scr_act());   // swipe down from the top
   Pages_Init();
   BLE_Link_Init();

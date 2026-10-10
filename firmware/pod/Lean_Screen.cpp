@@ -15,6 +15,10 @@
                near zero in a steady turn, because cornering force and gravity add up along
                the bike's own axis)
   - Lateral g is speed x turn rate / g.
+  - Longitudinal g (acceleration page) is the accelerometer along the bike's forward axis, which
+    the calibrated mounting keeps free of gravity on level ground. Road slope and the bike pitching
+    under braking leave a slow offset, so that is pulled towards the change in GPS speed (or to
+    zero when stopped): quick from the sensor, true in the long run from GPS.
 ******************************************************************************/
 #include "Lean_Screen.h"
 #include "BLE_Link.h"
@@ -77,6 +81,15 @@ static float max_left = 0, max_right = 0;
 static float speed_mps = 0;
 static uint32_t speed_at_ms = 0;
 static float history[HISTORY];
+// Acceleration page (see Lean_Screen.h, "Motion")
+#define MOTION_HISTORY  MOTION_HISTORY_POINTS
+static float motion_lat = 0, motion_lon = 0;          // g, + = right / + = speeding up
+static float lon_lp = 0, lon_offset = 0;              // forward reading smoothed; its slow offset
+static float gps_accel = 0;                           // g, from the phone's speed changes
+static uint32_t gps_accel_ms = 0;
+static float peak_accel = 0, peak_decel = 0, peak_lat_l = 0, peak_lat_r = 0;
+static float motion_hist_lat[MOTION_HISTORY], motion_hist_lon[MOTION_HISTORY];
+static uint8_t motion_head = 0;
 static float graph_lean = 0;      // lean filtered for the graph (~0.5 s), so it draws as a smooth curve
 static uint8_t history_head = 0;
 
@@ -187,19 +200,64 @@ static void Sample(lv_timer_t *timer)
     peak_left = peak_right = 0;
   }
 
+  // Acceleration. Readings smoothed over ~0.15 s (engine buzz and bumps); lateral only on the
+  // move (standing, the accelerometer's sideways reading is the stand's tilt, not cornering)
+  float smooth = fminf(1, dt / 0.15f);
+  motion_lat += ((v > MOVING_MPS ? lat_g : 0) - motion_lat) * smooth;
+  lon_lp += (Dot(a, forward) - lon_lp) * smooth;
+  bool gps_fresh = lv_tick_elaps(gps_accel_ms) < 3000 && v > 0.5f;
+  float truth = gps_fresh ? gps_accel : 0;             // stopped (or no phone): not accelerating
+  lon_offset += ((lon_lp - truth) - lon_offset) * fminf(1, dt / (gps_fresh ? 4.0f : 1.0f));
+  motion_lon = lon_lp - lon_offset;
+  if (v > 1.0f) {                                      // peaks only while riding
+    peak_accel = fmaxf(peak_accel, motion_lon);
+    peak_decel = fminf(peak_decel, motion_lon);
+    peak_lat_r = fmaxf(peak_lat_r, motion_lat);
+    peak_lat_l = fmaxf(peak_lat_l, -motion_lat);
+  }
+
   graph_lean += (lean - graph_lean) * dt / 0.5f;
   static uint32_t last_history_ms = 0;
   if (lv_tick_elaps(last_history_ms) >= HISTORY_MS) {
     last_history_ms = lv_tick_get();
     history[history_head] = graph_lean;
     history_head = (history_head + 1) % HISTORY;
+    motion_hist_lat[motion_head] = motion_lat;
+    motion_hist_lon[motion_head] = motion_lon;
+    motion_head = (motion_head + 1) % MOTION_HISTORY;
   }
 }
 
 void Lean_Set_Speed(float metres_per_second)
 {
-  speed_mps = metres_per_second;
-  speed_at_ms = lv_tick_get();
+  // Acceleration from the change in speed between the phone's updates (about one a second);
+  // smoothed, since each speed is only good to a tenth of a metre per second
+  uint32_t gap = lv_tick_elaps(speed_at_ms);
+  if (speed_at_ms && gap >= 300 && gap <= 3000) {
+    float accel = (metres_per_second - speed_mps) / (gap / 1000.0f) / 9.81f;
+    gps_accel += (accel - gps_accel) * 0.5f;
+    gps_accel_ms = lv_tick_get();
+  }
+  if (!speed_at_ms || gap >= 300) {
+    speed_mps = metres_per_second;
+    speed_at_ms = lv_tick_get();
+  }
+}
+
+void Motion_Get(Motion *out)
+{
+  out->lateral_g = motion_lat;
+  out->longitudinal_g = motion_lon;
+  out->peak_accel = peak_accel;
+  out->peak_decel = peak_decel;
+  out->peak_lat_left = peak_lat_l;
+  out->peak_lat_right = peak_lat_r;
+  out->history_head = motion_head;
+  for (int i = 0; i < MOTION_HISTORY; i++) {
+    int j = (motion_head + i) % MOTION_HISTORY;      // oldest first
+    out->history_lat[i] = motion_hist_lat[j];
+    out->history_lon[i] = motion_hist_lon[j];
+  }
 }
 
 void Lean_Calibrate(void)
@@ -209,6 +267,7 @@ void Lean_Calibrate(void)
   cal_count = 0;
   acc_sum = gyro_sum = { 0, 0, 0 };
   max_left = max_right = 0;
+  peak_accel = peak_decel = peak_lat_l = peak_lat_r = 0;
   memset(history, 0, sizeof(history));
   graph_lean = 0;
 }
@@ -436,7 +495,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   cal_label = Label(root, &font_small_26, COLOR_DIM);
   lv_obj_align(cal_label, LV_ALIGN_TOP_MID, 0, 392);
 
-  Pages_Add_Dots(root, 1);
+  Pages_Add_Dots(root, PAGE_LEAN);
 
   lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 

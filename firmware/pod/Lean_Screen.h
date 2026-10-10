@@ -13,3 +13,18 @@ void Lean_Screen_Show(bool show);
 void Lean_Set_Speed(float metres_per_second);
 // Re-measures and saves which way is up (pod still, bike upright) and clears the maximums
 void Lean_Calibrate(void);
+
+/* Motion, for the acceleration page: g felt along and across the bike. Estimates, not
+   measurements: lateral is speed x turn rate (0 when stopped), longitudinal the accelerometer
+   along the bike corrected by GPS speed changes. Peaks are since power-on (on bike power, the
+   ride) or since "Calibrate lean". History: one point every 0.2 s, oldest first. */
+#define MOTION_HISTORY_POINTS 80
+struct Motion {
+  float lateral_g;          // + = to the right
+  float longitudinal_g;     // + = speeding up, - = braking
+  float peak_accel, peak_decel;            // decel is negative
+  float peak_lat_left, peak_lat_right;     // both positive
+  uint8_t history_head;     // changes when a point is added
+  float history_lat[MOTION_HISTORY_POINTS], history_lon[MOTION_HISTORY_POINTS];
+};
+void Motion_Get(Motion *out);
