@@ -149,39 +149,62 @@ void Album_Art_Debug(void)
          have, ART_PARTS, art_raw ? "ok" : "MISSING");
 }
 
-static void Art_Draw(void)
+// Drawn a few rows at a time (whole-number maths, straight into the canvas buffer) so the
+// screen keeps updating: the whole cover in one go froze the page for two seconds
+static lv_color_t *art_buf;
+static lv_timer_t *art_timer;
+static int art_row;
+
+static void Art_Draw_Rows(lv_timer_t *timer)
 {
-  const float brightness = 0.55f, r_full = 150, r_zero = 238;
-  const float scale = (float)ART_SIZE / ART_SHOWN;
-  for (int y = 0; y < ART_SHOWN; y++) {
+  const int half = ART_SHOWN / 2, r_full = 150, r_zero = 238;   // fade from r_full out to r_zero
+  const int brightness = 141;                                    // of 256 (0.55)
+  uint32_t start = millis();
+  while (art_row < ART_SHOWN && millis() - start < 12) {
+    int y = art_row++;
+    // Source position in eighths of a pixel (4x: each output pixel is a quarter of a source one)
+    int v8 = 2 * y - 3, y0 = v8 >> 3, fy = v8 & 7;
+    int dy = 2 * y + 1 - ART_SHOWN;                              // in half pixels
+    lv_color_t *out = art_buf + y * ART_SHOWN;
     for (int x = 0; x < ART_SHOWN; x++) {
-      float u = (x + 0.5f) * scale - 0.5f, v = (y + 0.5f) * scale - 0.5f;
-      int x0 = (int)floorf(u), y0 = (int)floorf(v);
-      float fx = u - x0, fy = v - y0;
-      float rgb[3] = { 0, 0, 0 };
-      const int dx[4] = { 0, 1, 0, 1 }, dy[4] = { 0, 0, 1, 1 };
-      const float w[4] = { (1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy };
-      for (int k = 0; k < 4; k++) {
-        uint16_t c = Art_Px(x0 + dx[k], y0 + dy[k]);
-        rgb[0] += w[k] * ((c >> 11) & 0x1F) / 31.0f;
-        rgb[1] += w[k] * ((c >> 5) & 0x3F) / 63.0f;
-        rgb[2] += w[k] * (c & 0x1F) / 31.0f;
+      int dx = 2 * x + 1 - ART_SHOWN;
+      int d2 = (dx * dx + dy * dy) >> 2;                         // squared distance in pixels
+      int k;
+      if (d2 <= r_full * r_full) k = brightness;
+      else if (d2 >= r_zero * r_zero) { out[x] = lv_color_black(); continue; }
+      else {
+        float t = (sqrtf((float)d2) - r_full) / (r_zero - r_full);
+        k = (int)(brightness * (1 - t * t * (3 - 2 * t)));
       }
-      float d = sqrtf((x + 0.5f - ART_SHOWN / 2) * (x + 0.5f - ART_SHOWN / 2) + (y + 0.5f - ART_SHOWN / 2) * (y + 0.5f - ART_SHOWN / 2));
-      float t = LV_CLAMP(0.0f, (d - r_full) / (r_zero - r_full), 1.0f);
-      float k = brightness * (1 - t * t * (3 - 2 * t));
-      lv_color_t col = lv_color_make((uint8_t)(rgb[0] * k * 255), (uint8_t)(rgb[1] * k * 255), (uint8_t)(rgb[2] * k * 255));
-      lv_canvas_set_px_color(art_canvas, x, y, col);
+      int u8 = 2 * x - 3, x0 = u8 >> 3, fx = u8 & 7;
+      int w00 = (8 - fx) * (8 - fy), w10 = fx * (8 - fy), w01 = (8 - fx) * fy, w11 = fx * fy;   // sum 64
+      uint16_t a = Art_Px(x0, y0), b = Art_Px(x0 + 1, y0), cc = Art_Px(x0, y0 + 1), d = Art_Px(x0 + 1, y0 + 1);
+      int r = w00 * (a >> 11) + w10 * (b >> 11) + w01 * (cc >> 11) + w11 * (d >> 11);
+      int g = w00 * ((a >> 5) & 0x3F) + w10 * ((b >> 5) & 0x3F) + w01 * ((cc >> 5) & 0x3F) + w11 * ((d >> 5) & 0x3F);
+      int bl = w00 * (a & 0x1F) + w10 * (b & 0x1F) + w01 * (cc & 0x1F) + w11 * (d & 0x1F);
+      // 5/6/5 bits x64 weights x k/256 -> 8 bits per channel
+      out[x] = lv_color_make((r * k) >> 11, (g * k) >> 12, (bl * k) >> 11);
     }
   }
-  lv_obj_clear_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_invalidate(art_canvas);
+  if (art_row >= ART_SHOWN) {
+    lv_timer_del(art_timer);
+    art_timer = NULL;
+    lv_obj_clear_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(art_canvas);
+  }
+}
+
+static void Art_Draw(void)
+{
+  art_row = 0;
+  if (!art_timer) art_timer = lv_timer_create(Art_Draw_Rows, 5, NULL);
 }
 
 static void Art_Create(lv_obj_t *parent)
 {
   art_raw = (uint8_t *)heap_caps_malloc(ART_SIZE * ART_SIZE * 2, MALLOC_CAP_SPIRAM);
-  void *buf = heap_caps_malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR(ART_SHOWN, ART_SHOWN), MALLOC_CAP_SPIRAM);
+  art_buf = (lv_color_t *)heap_caps_malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR(ART_SHOWN, ART_SHOWN), MALLOC_CAP_SPIRAM);
+  void *buf = art_buf;
   art_canvas = lv_canvas_create(parent);
   lv_canvas_set_buffer(art_canvas, buf, ART_SHOWN, ART_SHOWN, LV_IMG_CF_TRUE_COLOR);
   lv_obj_align(art_canvas, LV_ALIGN_CENTER, 0, 0);
@@ -192,6 +215,7 @@ static void Art_Create(lv_obj_t *parent)
 static void Art_Request(const Phone_State &s)
 {
   art_id = art_id % 60000 + 1;
+  if (art_timer) { lv_timer_del(art_timer); art_timer = NULL; }   // an older cover half drawn
   lv_obj_add_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
   char line[160];
   snprintf(line, sizeof(line), "NOWPLAYING|%u|%s|%s", art_id, s.title, s.artist);
