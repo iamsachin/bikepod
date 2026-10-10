@@ -14,6 +14,7 @@
 #include "Lean_Screen.h"
 #include "Pages.h"
 #include "Journey_Screen.h"
+#include "Settings.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -83,13 +84,14 @@ void setup()
   // Screen on this core (1). Starting it from core 0 put its picture-copying interrupts next to
   // Bluetooth, which delayed them: the picture slipped (the old drift problem) for ~10% speed.
   LCD_Init();                       // screen, touch, backlight
-  Set_Backlight(100);               // full brightness for daylight
+  Settings_Init();                  // saved settings; sets the brightness
   Lvgl_Init();
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
   Journey_Screen_Create(lv_scr_act());   // swipe right from navigation
   Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
+  Settings_Panel_Create(lv_scr_act());   // swipe down from the top
   Pages_Init();
   BLE_Link_Init();
   lv_timer_create(Pod_Tick, 50, NULL);

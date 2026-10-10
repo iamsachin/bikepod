@@ -7,6 +7,7 @@
 #include "Lean_Screen.h"
 #include "Journey_Screen.h"
 #include "Map_Layer.h"
+#include "Settings.h"
 
 #define PAGE_COUNT 3
 
@@ -26,11 +27,22 @@ int Pages_Current(void)
   return page;
 }
 
+bool Pages_Nav_Visible(void)
+{
+  return page == 0 && !Settings_Panel_Open();
+}
+
+// Swipe left/right between pages; down from the top opens settings, up closes them
 static void Gesture_Cb(lv_event_t *e)
 {
   lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+  if (Settings_Panel_Open()) {
+    if (dir == LV_DIR_TOP) Settings_Panel_Show(false);
+    return;
+  }
   if (dir == LV_DIR_RIGHT) Pages_Show(page + 1);
   else if (dir == LV_DIR_LEFT) Pages_Show(page - 1);
+  else if (dir == LV_DIR_BOTTOM) Settings_Panel_Show(true);
 }
 
 void Pages_Add_Dots(lv_obj_t *page_root, int index)

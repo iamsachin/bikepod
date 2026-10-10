@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include "Map_Layer.h"
 #include "Pages.h"
+#include "Settings.h"
 #include <esp_heap_caps.h>
 #include <stdio.h>
 #include <math.h>
@@ -143,7 +144,7 @@ static void Ring_Draw(float value)
 
 static void Ring_Frame(lv_timer_t *timer)
 {
-  if (Pages_Current() != 0) return;         // covered by another page: redrawing it is wasted work
+  if (!Pages_Nav_Visible()) return;         // covered by another page: redrawing it is wasted work
   float coast = LV_MIN(lv_tick_elaps(ring_target_ms), RING_MAX_COAST_MS);
   float predicted = LV_MIN(ring_target + ring_rate * coast, 1000.0f);
   float next = ring_shown + (predicted - ring_shown) * 0.15f;   // ease in, ~100 ms time constant
@@ -700,13 +701,16 @@ void Nav_Screen_Show_Cruise(uint32_t speed_kmh, const char *clock)
     Set_Mode(MODE_CRUISE);
     Ring_Set_Fixed(0);
   }
-  Set_Info(NULL, clock, speed, &font_big_104, "km/h", "");
+  char time[12];
+  Settings_Format_Clock(clock, time, sizeof(time));
+  Set_Info(NULL, time, speed, &font_big_104, "km/h", "");
 }
 
 void Nav_Screen_Set_Trip(const char *eta, float km_left)
 {
-  char text[40];
-  snprintf(text, sizeof(text), "%s " MIDDLE_DOT " %.1f km", eta, km_left);
+  char text[40], clock[12];
+  Settings_Format_Clock(eta, clock, sizeof(clock));
+  snprintf(text, sizeof(text), "%s " MIDDLE_DOT " %.1f km", clock, km_left);
   Set_Text(eta_label, text);
   have_trip = true;
   Show_If(eta_label, mode == MODE_TURN || mode == MODE_REROUTING);

@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <stdio.h>
 #include "Pages.h"
+#include "Settings.h"
 
 LV_FONT_DECLARE(font_big_104);
 LV_FONT_DECLARE(font_title_44);
@@ -87,7 +88,9 @@ static void Refresh(lv_timer_t *timer)
   Set_Text(total_label, text);
   snprintf(text, sizeof(text), "%lu:%02lu", (unsigned long)(elapsed / 3600), (unsigned long)(elapsed / 60 % 60));
   Set_Text(time_label, text);
-  Set_Text(eta_label, eta_text);
+  char clock[12];
+  Settings_Format_Clock(eta_text, clock, sizeof(clock));
+  Set_Text(eta_label, clock);
   if (elapsed >= 60) snprintf(text, sizeof(text), "%d km/h", (int)lroundf(done / (elapsed / 3600.0f)));
   else snprintf(text, sizeof(text), "-");
   Set_Text(avg_label, text);
