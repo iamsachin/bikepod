@@ -498,7 +498,7 @@ void Nav_Screen_Create(void)
   road_label = Label_Create(turn_group, &font_text_32, COLOR_GREY);
   lv_obj_set_width(road_label, 380);
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
-  lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 172);
+  lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 180);
 
   /* Shared bottom line: arrival time and distance left */
   eta_label = Label_Create(scr, &font_text_32, COLOR_SOFT);
