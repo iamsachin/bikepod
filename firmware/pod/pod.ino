@@ -34,7 +34,7 @@ static void Show_Turn(const Nav_Message &msg)
     strlcpy(last_road, msg.text, sizeof(last_road));
   }
   uint16_t progress = 1000 - msg.distance_m * 1000 / approach_start_m;
-  Nav_Screen_Update(msg.dir, msg.distance_m, progress, msg.text);
+  Nav_Screen_Update(msg.dir, msg.distance_m, progress, msg.text, msg.rb_exit, msg.rb_degrees);
 }
 
 static void Pod_Tick(lv_timer_t *timer)

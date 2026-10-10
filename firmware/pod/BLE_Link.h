@@ -5,6 +5,8 @@
 // Phone -> pod over Bluetooth LE.
 // The phone writes one UTF-8 line at a time to the "Nav" characteristic:
 //   L|400|MG Rd               next turn: L = left, R = right, S = straight, metres, road name
+//   O|250|4|271|Hosur Rd      roundabout: metres, exit number (0 = unknown), degrees round to the
+//                             exit (+ clockwise, as in India; - anticlockwise), road name
 //   TRIP|18:42|6.0            arrival time and kilometres left
 //   RPATH|7|-2,-30;3,85;...   route around the rider, whole metres in map area 7's frame
 //   MAPBEGIN|7|12.9|77.6      start of map area 7 (roads around the rider, see Map_Layer.h),
@@ -32,6 +34,8 @@ struct Nav_Message {
   // MSG_TURN
   Turn_Dir dir;
   uint32_t distance_m;
+  uint8_t rb_exit;          // roundabouts only
+  int16_t rb_degrees;
   char text[64];            // MSG_TURN road name, MSG_ARRIVED destination
   // MSG_TRIP / MSG_CRUISE
   char clock[8];            // arrival time (TRIP) or local time (CRUISE)

@@ -74,6 +74,7 @@ final class Navigator {
     @ObservationIgnored private var podFeed: Task<Void, Never>?
     @ObservationIgnored private var routeRequestID = UUID()
     @ObservationIgnored private var navStatesLogged = 0
+    @ObservationIgnored private var lastLoggedManeuver = ""
 
     init(link: PodLink) {
         self.link = link
@@ -266,8 +267,25 @@ final class Navigator {
         distanceToTurn = Int(progress.distanceToNextManeuver.rounded())
         remainingKm = progress.distanceRemaining / 1000
 
-        let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier)
-        turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(Self.podText(Self.shortRoadName(content.text)))"
+        let road = Self.podText(Self.shortRoadName(content.text))
+        if let degrees = content.roundaboutExitDegrees, Self.isRoundabout(content.maneuverType) {
+            // O|metres|exit|degrees|road. The maneuver point is where the current step ends
+            let point = state.currentStep?.geometry.last
+            let exit = point.flatMap { junctionCapture.roundaboutExit(at: $0.lat, $0.lng) } ?? 0
+            // Degrees are measured in the driving direction: clockwise where traffic keeps left (India)
+            let right = point.map { junctionCapture.keepsRight(at: $0.lat, $0.lng) } ?? false
+            turnLine = "O|\(distanceToTurn)|\(exit)|\(right ? -Int(degrees) : Int(degrees))|\(road)"
+        } else {
+            let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier)
+            turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(road)"
+        }
+
+        // Log each new maneuver (not every distance update)
+        let maneuverKey = turnLine.split(separator: "|").enumerated().filter { $0.offset != 1 }.map(\.element).joined(separator: "|")
+        if maneuverKey != lastLoggedManeuver {
+            lastLoggedManeuver = maneuverKey
+            DebugLog.write("TURN \(turnLine) (type \(String(describing: content.maneuverType)), modifier \(String(describing: content.maneuverModifier)), degrees \(content.roundaboutExitDegrees.map(String.init) ?? "-"))")
+        }
 
         let eta = Date().addingTimeInterval(progress.durationRemaining)
         tripLine = String(format: "TRIP|%@|%.1f", Self.clockFormat.string(from: eta), remainingKm)
@@ -384,7 +402,14 @@ final class Navigator {
         return "Couldn't get a route. \(error.localizedDescription)"
     }
 
-    /// The pod only draws left / right / straight arrows for now.
+    private static func isRoundabout(_ type: ManeuverType?) -> Bool {
+        switch type {
+        case .roundabout, .rotary, .roundaboutTurn, .exitRoundabout, .exitRotary: true
+        default: false
+        }
+    }
+
+    /// The pod only draws left / right / straight arrows (and roundabouts, above).
     private static func podDirection(type: ManeuverType?, modifier: ManeuverModifier?) -> TurnDir {
         if type == .arrive { return .straight }
         switch modifier {

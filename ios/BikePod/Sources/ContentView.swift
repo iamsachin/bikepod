@@ -116,7 +116,7 @@ struct ContentView: View {
                 placeList(search.results, title: nil)
             } else if searchFocused, query.isEmpty {
                 placeList(recents.places, title: recents.places.isEmpty ? nil : "Recent")
-            } else if navigator.phase == .idle {
+            } else if navigator.phase == .idle, !searchFocused {      // not while typing
                 HStack(spacing: 8) {
                     ForEach(SavedPlaces.Slot.allCases) { slot in slotChip(slot) }
                     Spacer()

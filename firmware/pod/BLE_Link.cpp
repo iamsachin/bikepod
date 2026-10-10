@@ -173,6 +173,17 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     return true;
   }
 
+  // Roundabout: O|250|4|271|Hosur Rd
+  if (kind == "O") {
+    msg->kind = MSG_TURN;
+    msg->dir = TURN_ROUNDABOUT;
+    msg->distance_m = Field(text, 1).toInt();
+    msg->rb_exit = (uint8_t)Field(text, 2).toInt();
+    msg->rb_degrees = (int16_t)Field(text, 3).toInt();
+    Copy_Text(Rest_Ptr(text, 4), msg->text, sizeof(msg->text));
+    return true;
+  }
+
   // Turn: L|400|MG Rd
   if (kind.length() != 1) return false;
   switch (toupper(kind[0])) {

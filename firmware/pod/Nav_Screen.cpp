@@ -31,7 +31,7 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define RING_WIDTH      8
 
 // Header arrow: drawn in a 70x76 box with rounded strokes
-#define HEAD_ARROW_W    70
+#define HEAD_ARROW_W    80
 #define HEAD_ARROW_H    76
 #define HEAD_ARROW_LINE 11
 
@@ -45,8 +45,6 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 
 static lv_obj_t *ring;
 static lv_obj_t *turn_group;      // header + road + route drawing
-static lv_obj_t *head_stem;
-static lv_obj_t *head_tip;
 static lv_obj_t *dist_label;
 static lv_obj_t *unit_label;
 static lv_obj_t *road_label;
@@ -69,31 +67,6 @@ static Screen_Mode mode = MODE_WAITING;
 static bool stale = false;
 static bool have_trip = false;
 static uint32_t turn_distance_m = 0;
-
-// Header arrow shapes (70x76 box). Turn arrows bend through a quarter circle; see Arrows_Init().
-#define BEND_STEPS 7
-#define STEM_POINTS (BEND_STEPS + 3)          // start, bend points (BEND_STEPS + 1), end
-static lv_point_t right_stem[STEM_POINTS];
-static lv_point_t left_stem[STEM_POINTS];
-static lv_point_t right_tip[]  = { {44, 9}, {58, 23}, {44, 37} };
-static lv_point_t left_tip[]   = { {26, 9}, {12, 23}, {26, 37} };
-static lv_point_t ahead_stem[] = { {35, 70}, {35, 10} };
-static lv_point_t ahead_tip[]  = { {21, 24}, {35, 10}, {49, 24} };
-
-static void Arrows_Init(void)
-{
-  // Right turn: up the stem, round a 16 px radius bend, then right to the tip. Left is its mirror.
-  const float r = 16, cx = 16 + r, cy = 23 + r;
-  right_stem[0] = { 16, 70 };
-  for (int i = 0; i <= BEND_STEPS; i++) {
-    float a = (float)M_PI - i * ((float)M_PI / 2) / BEND_STEPS;   // 180 -> 90 degrees
-    right_stem[1 + i] = { (lv_coord_t)lroundf(cx + r * cosf(a)), (lv_coord_t)lroundf(cy - r * sinf(a)) };
-  }
-  right_stem[STEM_POINTS - 1] = { 58, 23 };
-  for (int i = 0; i < STEM_POINTS; i++) {
-    left_stem[i] = { (lv_coord_t)(HEAD_ARROW_W - right_stem[i].x), right_stem[i].y };
-  }
-}
 
 static lv_obj_t *Line_Create(lv_obj_t *parent, lv_coord_t width, lv_color_t color, lv_opa_t opa)
 {
@@ -385,6 +358,154 @@ static void Marker_Create(lv_obj_t *parent)
   lv_obj_set_pos(canvas, MARKER_X - MARKER_OX, MARKER_Y - MARKER_OY);
 }
 
+/*********************************** Turn icon ***********************************
+ * The arrow (or roundabout) beside the distance, drawn here with smooth edges into a small image
+ * whenever the turn changes: thick strokes with round ends, a quarter-circle bend, a filled
+ * arrowhead. (LVGL's thick lines made blunt, lumpy arrows at this size.) Every pixel is sampled
+ * 4x4 times; anything not covered is transparent.
+ *
+ * Roundabouts: a dim ring entered from the bottom, the way round drawn bright (clockwise in
+ * India) to the exit, which leaves the ring at its real angle; the exit number sits inside.
+ **********************************************************************************/
+#define ICON_SS   4
+
+static lv_obj_t *icon_canvas, *rb_num;
+
+struct Icon_Shape {
+  // Bright strokes: up to 3 capsules (thick lines with round ends) and one arc
+  int caps;
+  float cap[3][4], cap_hw;
+  bool has_arc;
+  float arc_cx, arc_cy, arc_r, arc_hw, arc_start, arc_sweep;   // degrees, LVGL convention (clockwise from 3 o'clock)
+  bool has_tri;
+  float tri[3][2];
+  bool has_ring;                                // dim full ring (roundabouts), same centre/radius as the arc
+  float ring_hw;
+  bool mirror;                                  // evaluate at (W - x): left turns are mirrored right turns
+};
+
+static inline float Seg_Dist2(float px, float py, const float *s)
+{
+  float dx = s[2] - s[0], dy = s[3] - s[1], len2 = dx * dx + dy * dy;
+  float t = len2 > 0 ? LV_CLAMP(0.0f, ((px - s[0]) * dx + (py - s[1]) * dy) / len2, 1.0f) : 0;
+  float qx = s[0] + t * dx - px, qy = s[1] + t * dy - py;
+  return qx * qx + qy * qy;
+}
+
+static inline bool In_Tri(float px, float py, const float (*t)[2])
+{
+  float d1 = (px - t[1][0]) * (t[0][1] - t[1][1]) - (t[0][0] - t[1][0]) * (py - t[1][1]);
+  float d2 = (px - t[2][0]) * (t[1][1] - t[2][1]) - (t[1][0] - t[2][0]) * (py - t[2][1]);
+  float d3 = (px - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (py - t[0][1]);
+  bool neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(neg && pos);
+}
+
+// 2 = bright, 1 = dim ring, 0 = nothing
+static int Icon_Sample(const Icon_Shape &s, float x, float y)
+{
+  if (s.mirror) x = HEAD_ARROW_W - x;
+  for (int i = 0; i < s.caps; i++)
+    if (Seg_Dist2(x, y, s.cap[i]) <= s.cap_hw * s.cap_hw) return 2;
+  if (s.has_tri && In_Tri(x, y, s.tri)) return 2;
+  if (s.has_arc || s.has_ring) {
+    float dx = x - s.arc_cx, dy = y - s.arc_cy, d = sqrtf(dx * dx + dy * dy);
+    if (s.has_arc && fabsf(d - s.arc_r) <= s.arc_hw) {
+      float ang = atan2f(dy, dx) * 180 / (float)M_PI;   // clockwise from 3 o'clock (y is down)
+      float rel = s.arc_sweep >= 0 ? fmodf(ang - s.arc_start + 720, 360) : fmodf(s.arc_start - ang + 720, 360);
+      if (rel <= fabsf(s.arc_sweep)) return 2;
+    }
+    if (s.has_ring && fabsf(d - s.arc_r) <= s.ring_hw) return 1;
+  }
+  return 0;
+}
+
+static void Icon_Render(const Icon_Shape &s)
+{
+  const lv_color_t bright = COLOR_TEXT, dim = lv_color_hex(0x505050);
+  for (int py = 0; py < HEAD_ARROW_H; py++) {
+    for (int px = 0; px < HEAD_ARROW_W; px++) {
+      int n_bright = 0, n_dim = 0;
+      for (int sy = 0; sy < ICON_SS; sy++)
+        for (int sx = 0; sx < ICON_SS; sx++) {
+          int v = Icon_Sample(s, px + (sx + 0.5f) / ICON_SS, py + (sy + 0.5f) / ICON_SS);
+          if (v == 2) n_bright++;
+          else if (v == 1) n_dim++;
+        }
+      int total = n_bright + n_dim;
+      lv_color_t col = total ? lv_color_mix(bright, dim, (lv_opa_t)(n_bright * 255 / total)) : bright;
+      lv_canvas_set_px_color(icon_canvas, px, py, col);
+      lv_canvas_set_px_opa(icon_canvas, px, py, (lv_opa_t)(total * 255 / (ICON_SS * ICON_SS)));
+    }
+  }
+  lv_obj_invalidate(icon_canvas);
+}
+
+// Arrowhead pointing along (ux, uy) with its tip at (tx, ty)
+static void Icon_Head(Icon_Shape &s, float tx, float ty, float ux, float uy, float length, float half_width)
+{
+  float bx = tx - length * ux, by = ty - length * uy, nx = -uy, ny = ux;
+  s.has_tri = true;
+  s.tri[0][0] = tx; s.tri[0][1] = ty;
+  s.tri[1][0] = bx + half_width * nx; s.tri[1][1] = by + half_width * ny;
+  s.tri[2][0] = bx - half_width * nx; s.tri[2][1] = by - half_width * ny;
+}
+
+static void Icon_Set(Turn_Dir dir, int16_t degrees, uint8_t exit_number)
+{
+  Icon_Shape s = {};
+  const float hw = HEAD_ARROW_LINE / 2.0f;
+  if (dir == TURN_ROUNDABOUT) {
+    const float cx = 40, cy = 38, r = 21;
+    int travel = LV_CLAMP(-359, degrees, 359);
+    if (travel == 0) travel = 180;                    // unknown: straight across
+    s.has_ring = true; s.ring_hw = 3.5f;
+    s.has_arc = true; s.arc_cx = cx; s.arc_cy = cy; s.arc_r = r; s.arc_hw = 4.5f;
+    s.arc_start = 90; s.arc_sweep = travel;           // entry at the bottom
+    float a = (90 + travel) * (float)M_PI / 180, ux = cosf(a), uy = sinf(a);
+    s.cap_hw = 4.5f; s.caps = 2;
+    float entry[4] = { cx, HEAD_ARROW_H - 5, cx, cy + r };
+    float exit_stem[4] = { cx + r * ux, cy + r * uy, cx + 28 * ux, cy + 28 * uy };
+    memcpy(s.cap[0], entry, sizeof(entry));
+    memcpy(s.cap[1], exit_stem, sizeof(exit_stem));
+    Icon_Head(s, cx + 38 * ux, cy + 38 * uy, ux, uy, 12, 9.5f);
+  } else if (dir == TURN_STRAIGHT) {
+    s.cap_hw = hw; s.caps = 1;
+    float stem[4] = { 40, HEAD_ARROW_H - 6, 40, 26 };
+    memcpy(s.cap[0], stem, sizeof(stem));
+    Icon_Head(s, 40, 4, 0, -1, 22, 15);
+  } else {
+    // Right turn (left is its mirror): up, round a quarter-circle bend, right to a filled head
+    s.mirror = dir == TURN_LEFT;
+    s.cap_hw = hw; s.caps = 2;
+    float stem[4] = { 23, HEAD_ARROW_H - 6, 23, 42 }, across[4] = { 39, 26, 47, 26 };
+    memcpy(s.cap[0], stem, sizeof(stem));
+    memcpy(s.cap[1], across, sizeof(across));
+    s.has_arc = true; s.arc_cx = 39; s.arc_cy = 42; s.arc_r = 16; s.arc_hw = hw;
+    s.arc_start = 180; s.arc_sweep = 90;             // left point -> top point
+    Icon_Head(s, 71, 26, 1, 0, 22, 15);
+  }
+  Icon_Render(s);
+
+  char num[4] = "";
+  if (dir == TURN_ROUNDABOUT && exit_number > 0) snprintf(num, sizeof(num), "%u", exit_number);
+  Set_Text(rb_num, num);
+  Show_If(rb_num, num[0]);
+  lv_obj_align(rb_num, LV_ALIGN_TOP_LEFT,
+               40 - lv_txt_get_width(num, strlen(num), &font_small_26, 0, LV_TEXT_FLAG_NONE) / 2,
+               38 - font_small_26.line_height / 2);
+}
+
+static void Icon_Create(lv_obj_t *box)
+{
+  void *buf = heap_caps_malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(HEAD_ARROW_W, HEAD_ARROW_H), MALLOC_CAP_SPIRAM);
+  icon_canvas = lv_canvas_create(box);
+  lv_canvas_set_buffer(icon_canvas, buf, HEAD_ARROW_W, HEAD_ARROW_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
+  lv_canvas_fill_bg(icon_canvas, lv_color_black(), LV_OPA_TRANSP);
+  rb_num = Label_Create(box, &font_small_26, COLOR_TEXT);
+  lv_obj_add_flag(rb_num, LV_OBJ_FLAG_HIDDEN);
+}
+
 /********************************* Screen setup *********************************/
 static void Set_Mode(Screen_Mode new_mode)
 {
@@ -456,7 +577,6 @@ void Nav_Screen_Create(void)
   lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-  Arrows_Init();
 
   // Thin progress ring near the edge: starts at 12 o'clock and fills clockwise
   ring = Edge_Arc(scr, COLOR_BLUE);
@@ -496,8 +616,7 @@ void Nav_Screen_Create(void)
   lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 88);
 
   lv_obj_t *arrow_box = Plain_Box(header, HEAD_ARROW_W, HEAD_ARROW_H);
-  head_stem = Line_Create(arrow_box, HEAD_ARROW_LINE, COLOR_TEXT, LV_OPA_COVER);
-  head_tip = Line_Create(arrow_box, HEAD_ARROW_LINE, COLOR_TEXT, LV_OPA_COVER);
+  Icon_Create(arrow_box);
 
   dist_label = Label_Create(header, &font_big_104, COLOR_TEXT);
   unit_label = Label_Create(header, &font_text_32, COLOR_GREY);
@@ -618,7 +737,8 @@ Screen_Mode Nav_Screen_Mode(void)
   return mode;
 }
 
-void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, const char *road)
+void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, const char *road,
+                       uint8_t rb_exit, int16_t rb_degrees)
 {
   if (mode != MODE_TURN) {
     Set_Mode(MODE_TURN);
@@ -627,23 +747,12 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
   turn_distance_m = distance_m;
   Map_Layer_Set_Turn_Distance(distance_m);   // the map zooms in as the turn gets closer
 
-  static int shown_dir = -1;                // arrow shapes only change with the direction
-  if ((int)dir != shown_dir) {
-    shown_dir = dir;
-    switch (dir) {
-      case TURN_LEFT:
-        lv_line_set_points(head_stem, left_stem, STEM_POINTS);
-        lv_line_set_points(head_tip, left_tip, 3);
-        break;
-      case TURN_RIGHT:
-        lv_line_set_points(head_stem, right_stem, STEM_POINTS);
-        lv_line_set_points(head_tip, right_tip, 3);
-        break;
-      default:
-        lv_line_set_points(head_stem, ahead_stem, 2);
-        lv_line_set_points(head_tip, ahead_tip, 3);
-        break;
-    }
+  // The icon is only redrawn when the turn changes (drawing it takes a few tens of ms)
+  static int shown_key = -1;
+  int key = dir == TURN_ROUNDABOUT ? (int)dir * 1000000 + (rb_degrees + 1000) * 256 + rb_exit : (int)dir * 1000000;
+  if (key != shown_key) {
+    shown_key = key;
+    Icon_Set(dir, rb_degrees, rb_exit);
   }
 
   // Round like a car navigator: 1.2 km, 350 m (10 m steps), 45 m (5 m steps)
