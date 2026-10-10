@@ -531,14 +531,21 @@ static void Draw_Route(const Raster &r)
   }
   Pt here = To_Screen(&r.box, px, py);
 
-  // Each part in one pass: the line with its black casing around it (behind: dim, ahead: bright)
+  // Casing first for the whole route, then the lines on top: drawing each piece's casing and
+  // line together let the next piece's casing paint black stripes across the previous line
   const float behind = (ROUTE_WIDTH - 2) / 2.0f, ahead = ROUTE_WIDTH / 2.0f;
-  lv_color_t black = lv_color_black();
-  Polyline(r, route, split + 1, ox, oy, NULL, behind + ROUTE_CASING, lv_color_hex(COLOR_ROUTE_DONE), behind, black);
-  Capsule2(r, To_Screen(&r.box, ox + route[split][0], oy + route[split][1]), here,
-           behind + ROUTE_CASING, lv_color_hex(COLOR_ROUTE_DONE), behind, black);
-  Polyline(r, route + split + 1, route_count - split - 1, ox, oy, &here,
-           ahead + ROUTE_CASING, lv_color_hex(COLOR_ROUTE), ahead, black);
+  lv_color_t black = lv_color_black(), done = lv_color_hex(COLOR_ROUTE_DONE), bright = lv_color_hex(COLOR_ROUTE);
+  Pt split_pt = To_Screen(&r.box, ox + route[split][0], oy + route[split][1]);
+  for (int pass = 0; pass < 2; pass++) {
+    float extra = pass == 0 ? ROUTE_CASING : 0;
+    Polyline(r, route, split + 1, ox, oy, NULL, behind + extra, pass == 0 ? black : done, behind + extra, pass == 0 ? black : done);
+    Capsule2(r, split_pt, here, behind + extra, pass == 0 ? black : done, behind + extra, pass == 0 ? black : done);
+  }
+  for (int pass = 0; pass < 2; pass++) {
+    float extra = pass == 0 ? ROUTE_CASING : 0;
+    Polyline(r, route + split + 1, route_count - split - 1, ox, oy, &here, ahead + extra,
+             pass == 0 ? black : bright, ahead + extra, pass == 0 ? black : bright);
+  }
 }
 
 static void Draw_Event(lv_event_t *e)
