@@ -39,7 +39,9 @@ void Battery_Update(void)
   head = (head + 1) % SAMPLES;
   if (count < SAMPLES) count++;
 
-  // Every 2 s: the 2 s average into the history, then look for a step
+  // Every 2 s: the 2 s average into the history, then look for a step. Not in the first 4 s:
+  // the first readings after power-on come out low (3.98 V on the charger) and looked like a step
+  if (millis() < 4000) return;
   static float sum2 = 0;
   static int n2 = 0;
   sum2 += volts;
