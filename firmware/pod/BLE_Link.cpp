@@ -178,6 +178,7 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   }
   if (kind == "REROUTE") {
     msg->kind = MSG_REROUTE;
+    Copy_Text(Rest_Ptr(text, 1), msg->text, sizeof(msg->text));   // why, e.g. "No internet" (may be empty)
     return true;
   }
   if (kind == "ARRIVED") {

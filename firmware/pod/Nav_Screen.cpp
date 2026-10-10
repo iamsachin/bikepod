@@ -240,7 +240,9 @@ static void Icons_Create(lv_obj_t *parent)
   lv_obj_set_style_arc_width(loop, 7, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(loop, COLOR_AMBER, LV_PART_INDICATOR);
   lv_arc_set_bg_angles(loop, 0, 360);
-  lv_arc_set_angles(loop, 300, 240);          // open gap at the top-right
+  // Drawn clockwise from 340 deg round to 280 deg (just right of the top), where the arrowhead
+  // carries on: the gap is ahead of the head, so it reads as a clockwise arrow
+  lv_arc_set_angles(loop, 340, 280);
   static lv_point_t tip[] = { {33, 0}, {44, 9}, {32, 18} };
   lv_obj_t *tip_line = Line_Create(icon_reroute, 7, COLOR_AMBER, LV_OPA_COVER);
   lv_line_set_points(tip_line, tip, 3);
@@ -709,13 +711,13 @@ void Nav_Screen_Show_Waiting(void)
   Wait_Clock_Tick(NULL);
 }
 
-void Nav_Screen_Show_Rerouting(void)
+void Nav_Screen_Show_Rerouting(const char *detail)
 {
   if (mode != MODE_REROUTING) {             // repeats of the same screen only update the text
     Set_Mode(MODE_REROUTING);
     Map_Layer_Clear_Route();
   }
-  Set_Info(icon_reroute, "", "Rerouting", &font_title_44, "Finding a new route", "");
+  Set_Info(icon_reroute, "", "Rerouting", &font_title_44, detail && detail[0] ? detail : "Finding a new route", "");
 }
 
 void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, const char *place)

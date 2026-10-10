@@ -14,6 +14,7 @@
   - Lateral g is speed x turn rate / g.
 ******************************************************************************/
 #include "Lean_Screen.h"
+#include "BLE_Link.h"
 #include <Arduino.h>
 #include <math.h>
 #include "Gyro_QMI8658.h"
@@ -134,6 +135,22 @@ static void Sample(lv_timer_t *timer)
 
   if (lean > max_right) max_right = lean;
   if (-lean > max_left) max_left = -lean;
+
+  // The deepest lean each side since the last report, for the app's ride history: sent every
+  // 2 s while moving (standing still, the reading is just how the bike is parked)
+  static float peak_left = 0, peak_right = 0;
+  static uint32_t reported_ms = 0;
+  peak_right = fmaxf(peak_right, lean);
+  peak_left = fmaxf(peak_left, -lean);
+  if (lv_tick_elaps(reported_ms) >= 2000) {
+    reported_ms = lv_tick_get();
+    if (v > MOVING_MPS) {
+      char line[24];
+      snprintf(line, sizeof(line), "LEAN|%d|%d", (int)lroundf(peak_left), (int)lroundf(peak_right));
+      BLE_Link_Notify(line);
+    }
+    peak_left = peak_right = 0;
+  }
 
   graph_lean += (lean - graph_lean) * dt / 0.5f;
   static uint32_t last_history_ms = 0;

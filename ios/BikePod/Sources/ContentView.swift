@@ -15,8 +15,8 @@ struct ContentView: View {
 
     /// OpenFreeMap: free OpenStreetMap vector tiles, no API key needed. Dark style in dark mode
     /// (easier on the eyes at night, and matches the pod).
-    private static let lightStyle = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
-    private static let darkStyle = URL(string: "https://tiles.openfreemap.org/styles/dark")!
+    static let lightStyle = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
+    static let darkStyle = URL(string: "https://tiles.openfreemap.org/styles/dark")!
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -33,6 +33,7 @@ struct ContentView: View {
     @State private var query = ""
     @State private var camera: MapViewCamera = .trackUserLocation(zoom: 14)
     @State private var showPodTest = false
+    @State private var showRides = false
     @FocusState private var searchFocused: Bool
 
     private var isNavigating: Bool { navigator.phase == .navigating }
@@ -101,6 +102,9 @@ struct ContentView: View {
                 .onAppear { navigator.podFeedPaused = true }
                 .onDisappear { navigator.podFeedPaused = false }
         }
+        .sheet(isPresented: $showRides) {
+            RidesView(history: navigator.history)
+        }
         .onChange(of: navigator.phase) { _, phase in
             if case let .preview(route) = phase {
                 camera = .boundingBox(route.mapBounds,
@@ -138,6 +142,10 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     ForEach(SavedPlaces.Slot.allCases) { slot in slotChip(slot) }
                     Spacer()
+                    Button { showRides = true } label: {
+                        chipLabel("Rides", systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             if let error = search.error {
@@ -227,12 +235,8 @@ struct ContentView: View {
         return Button {
             if let place { go(to: place) } else { startSaving(slot) }
         } label: {
-            Label(place == nil ? "Set \(slot.rawValue.lowercased())" : slot.rawValue, systemImage: slot.symbol)
-                .font(.footnote.weight(.semibold))
+            chipLabel(place == nil ? "Set \(slot.rawValue.lowercased())" : slot.rawValue, systemImage: slot.symbol)
                 .foregroundStyle(place == nil ? .secondary : .primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(.regularMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -241,6 +245,14 @@ struct ContentView: View {
                 Button("Remove", systemImage: "trash", role: .destructive) { saved.set(slot, to: nil) }
             }
         }
+    }
+
+    private func chipLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: Capsule())
     }
 
     private func placeList(_ places: [Place], title: String?) -> some View {

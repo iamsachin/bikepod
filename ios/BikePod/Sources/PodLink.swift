@@ -25,8 +25,12 @@ final class PodLink: NSObject {
     /// Pod -> phone lines (notifications), e.g. NOWPLAYING|7|title|artist
     static let eventCharUUID = CBUUID(string: "6e0a3a5c-6f2b-4c1d-9c9a-2b6c5d7e8f10")
 
-    /// Called (on the main queue) with each line the pod sends
-    @ObservationIgnored var onEvent: ((String) -> Void)?
+    @ObservationIgnored private var eventHandlers: [(String) -> Void] = []
+
+    /// Calls `handler` (on the main queue) with each line the pod sends (NOWPLAYING, LEAN, ...)
+    func onEvent(_ handler: @escaping (String) -> Void) {
+        eventHandlers.append(handler)
+    }
 
     enum State: String {
         case bluetoothOff = "Bluetooth is off"
@@ -189,8 +193,8 @@ extension PodLink: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
               let line = String(data: data, encoding: .utf8) else { return }
-        DebugLog.write("LINK event \(line.prefix(80))")
-        onEvent?(line)
+        if !line.hasPrefix("LEAN|") { DebugLog.write("LINK event \(line.prefix(80))") }   // LEAN: every 2 s
+        for handler in eventHandlers { handler(line) }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {

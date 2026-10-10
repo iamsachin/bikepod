@@ -20,7 +20,7 @@ void Nav_Screen_Set_Trip(const char *eta, float km_left);
 void Nav_Screen_Set_Limit(uint32_t kmh);
 void Nav_Screen_Set_Bump(uint32_t metres);
 void Nav_Screen_Show_Waiting(void);
-void Nav_Screen_Show_Rerouting(void);
+void Nav_Screen_Show_Rerouting(const char *detail);   // detail: why (empty = "Finding a new route")
 void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, const char *place);
 void Nav_Screen_Show_Cruise(uint32_t speed_kmh, const char *clock);
 void Nav_Screen_Set_Stale(bool stale);

@@ -20,7 +20,7 @@
 //   LIMIT|50                  speed limit where the rider is, km/h (0 = not known)
 //   BUMP|85                   metres to the next mapped speed breaker (0 = none close)
 //   TIME|16|32|05             the phone's local time (sets the pod's clock)
-//   REROUTE                   off route, a new route is being fetched
+//   REROUTE|detail            off route, a new route is being fetched ("Finding a new route" / "No internet")
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
 // The phone repeats its current lines every ~2 s so the pod can spot a silent link.
@@ -29,6 +29,7 @@
 #define POD_NAV_CHAR_UUID     "50632787-1b5b-4788-a4ee-8ff5dc145962"
 // Pod -> phone: notifications the app subscribes to, one UTF-8 line each:
 //   NOWPLAYING|7|Tum Hi Ho|Arijit Singh   the song changed (id 7): the app looks up its cover
+//   LEAN|31|27                 deepest lean left / right (degrees) in the last 2 s, while moving
 // Phone -> pod, in reply (on the Nav characteristic):
 //   ART|7|0|80|<base64>       part 0 of 80 of song 7's cover: 120x120 RGB565, 360 bytes a part
 #define POD_EVENT_CHAR_UUID   "6e0a3a5c-6f2b-4c1d-9c9a-2b6c5d7e8f10"
@@ -45,7 +46,7 @@ struct Nav_Message {
   uint32_t distance_m;
   uint8_t rb_exit;          // roundabouts only
   int16_t rb_degrees;
-  char text[64];            // MSG_TURN road name, MSG_ARRIVED destination
+  char text[64];            // MSG_TURN road name, MSG_ARRIVED destination, MSG_REROUTE detail
   // MSG_TRIP / MSG_CRUISE
   char clock[8];            // arrival time (TRIP) or local time (CRUISE)
   float km;                 // km left (TRIP) or trip km (ARRIVED)

@@ -3,6 +3,7 @@ import CoreLocation
 import FerrostarCore
 import FerrostarCoreFFI
 import Foundation
+import Network
 import Observation
 
 /// Turn-by-turn guidance: Valhalla plans the route, Ferrostar follows the GPS along it,
@@ -31,6 +32,7 @@ final class Navigator {
     private(set) var instruction = ""
     private(set) var distanceToTurn = 0
     private(set) var remainingKm = 0.0
+    /// Off the route, or fetching a new one
     private(set) var rerouting = false
     /// Full Ferrostar state, for the in-app navigation map
     private(set) var navState: NavigationState?
@@ -44,6 +46,9 @@ final class Navigator {
     var simulationSpeed: UInt64 = 4
     /// The finished trip, for the Arrived card
     private(set) var lastTrip: (km: Double, seconds: TimeInterval)?
+    /// Past rides; the one in progress is recorded as it goes
+    let history = RideHistory()
+    @ObservationIgnored private var recorder: RideRecorder?
 
     /// Updated as fixes arrive (reading the provider directly didn't refresh the screen)
     private(set) var hasGPS = false
@@ -78,9 +83,26 @@ final class Navigator {
     @ObservationIgnored private var routeRequestID = UUID()
     @ObservationIgnored private var navStatesLogged = 0
     @ObservationIgnored private var lastLoggedManeuver = ""
+    /// The pod keeps "Rerouting" up at least this long: the new route often comes back in under a
+    /// second, between two pod updates, and the screen never showed
+    @ObservationIgnored private var rerouteHeldUntil = Date.distantPast
+    /// Whether the phone has internet, to say why no new route is coming
+    @ObservationIgnored private let network = NWPathMonitor()
+    @ObservationIgnored private var online = true
 
     init(link: PodLink) {
         self.link = link
+        network.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            Task { @MainActor in self?.online = online }
+        }
+        network.start(queue: .global(qos: .utility))
+        // The pod's deepest lean in the last 2 s, for the ride history
+        link.onEvent { [weak self] line in
+            let fields = line.split(separator: "|")
+            guard fields.count == 3, fields[0] == "LEAN", let left = Int(fields[1]), let right = Int(fields[2]) else { return }
+            self?.recorder?.lean(left: left, right: right)
+        }
         podFeed = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -205,6 +227,7 @@ final class Navigator {
             tripStartedAt = Date()
             tripKm = route.distance / 1000
             lastTrip = nil
+            recorder = RideRecorder(destination: destinationName, simulated: simulate)
             turnLine = ""
             tripLine = ""
             pathLine = ""
@@ -229,6 +252,7 @@ final class Navigator {
     }
 
     func stop() {
+        finishRide(arrived: false)           // ended before arriving (after arriving it's already saved)
         routeRequestID = UUID()
         stateWatch = nil
         core?.stopNavigation()
@@ -241,6 +265,8 @@ final class Navigator {
         limitLine = ""
         bumpLine = ""
         hazards.clear()
+        rerouting = false
+        rerouteHeldUntil = .distantPast
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -254,16 +280,28 @@ final class Navigator {
             DebugLog.write(String(format: "STATE %d navigating=%d user %.6f,%.6f acc %.0f", navStatesLogged, state.isNavigating ? 1 : 0,
                                   p?.coordinates.lat ?? 0, p?.coordinates.lng ?? 0, p?.horizontalAccuracy ?? -1))
         }
-        rerouting = state.isCalculatingNewRoute
+        // Off the route entirely (Ferrostar asks for a new route at most every 5 s and only after
+        // moving 50 m, and keeps the old one if the request fails), or already fetching one
+        var offRoute = false
+        if case .deviation(kind: .completelyOffRoute) = state.currentDeviation { offRoute = true }
+        let nowRerouting = state.isCalculatingNewRoute || offRoute
+        if nowRerouting != rerouting {
+            DebugLog.write("REROUTE \(nowRerouting ? "start" : "done") (fetching \(state.isCalculatingNewRoute ? 1 : 0), off route \(offRoute ? 1 : 0))")
+        }
+        rerouting = nowRerouting
+        if rerouting { rerouteHeldUntil = Date().addingTimeInterval(2) }
 
         if case .complete = state.tripState {
             if phase != .arrived {
-                lastTrip = (tripKm, Date().timeIntervalSince(tripStartedAt))
+                // The distance actually ridden (detours included), else the route's
+                let ridden = finishRide(arrived: true)?.km ?? 0
+                lastTrip = (ridden > 0 ? ridden : tripKm, Date().timeIntervalSince(tripStartedAt))
             }
             phase = .arrived
             updatePod()
             return
         }
+        if let location = state.preferredUserLocation { recorder?.add(location) }
         guard state.isNavigating,
               let progress = state.currentProgress,
               let content = state.currentVisualInstruction?.primaryContent
@@ -338,6 +376,15 @@ final class Navigator {
         updatePod()
     }
 
+    @discardableResult
+    private func finishRide(arrived: Bool) -> Ride? {
+        guard let recorder else { return nil }
+        self.recorder = nil
+        let ride = recorder.finish(arrived: arrived)
+        history.save(ride, track: recorder.track)
+        return ride
+    }
+
     private static let clockFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
@@ -366,7 +413,10 @@ final class Navigator {
     private var screenLines: [(kind: String, line: String)] {
         switch phase {
         case .navigating:
-            if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
+            if rerouting || Date() < rerouteHeldUntil {
+                let detail = rerouting && !online ? "No internet" : "Finding a new route"
+                return [("state", "REROUTE|\(detail)")] + (tripLine.isEmpty ? [] : [("trip", tripLine)])
+            }
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
             // Turn first (the pod zooms from the turn distance), poses before the route (the pod
             // anchors the route to the latest pose)

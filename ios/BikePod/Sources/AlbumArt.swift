@@ -16,7 +16,7 @@ final class AlbumArt {
 
     init(link: PodLink) {
         self.link = link
-        link.onEvent = { [weak self] line in self?.handle(line) }
+        link.onEvent { [weak self] line in self?.handle(line) }
     }
 
     private func handle(_ line: String) {
