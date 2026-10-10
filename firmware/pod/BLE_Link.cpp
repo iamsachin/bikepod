@@ -66,29 +66,6 @@ static uint8_t Parse_Path(const String &list, int16_t (*pts)[2])
   return count;
 }
 
-// "x,y,a[,t];..." -> stubs
-static uint8_t Parse_Stubs(const String &list, int16_t (*stubs)[4])
-{
-  uint8_t count = 0;
-  int pos = 0;
-  while (pos < (int)list.length() && count < NAV_MAX_STUBS) {
-    int semi = list.indexOf(';', pos);
-    if (semi < 0) semi = list.length();
-    int c1 = list.indexOf(',', pos);
-    int c2 = c1 < 0 ? -1 : list.indexOf(',', c1 + 1);
-    if (c1 > pos && c2 > c1 && c2 < semi) {
-      int c3 = list.indexOf(',', c2 + 1);
-      bool flagged = c3 > c2 && c3 < semi;
-      stubs[count][0] = list.substring(pos, c1).toInt();
-      stubs[count][1] = list.substring(c1 + 1, c2).toInt();
-      stubs[count][2] = list.substring(c2 + 1, flagged ? c3 : semi).toInt();
-      stubs[count][3] = flagged ? list.substring(c3 + 1, semi).toInt() : 0;
-      count++;
-    }
-    pos = semi + 1;
-  }
-  return count;
-}
 
 // Map lines come in bursts of ~100, too many for the message queue: they go straight into
 // the map's own buffer. Returns true if the line was a map line.
@@ -175,14 +152,9 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     msg->km = Field(text, 2).toFloat();
     return true;
   }
-  if (kind == "PATH") {
-    msg->kind = MSG_PATH;
+  if (kind == "RPATH") {
+    msg->kind = MSG_ROUTE;
     msg->path_count = Parse_Path(Rest(text, 1), msg->path);
-    return true;
-  }
-  if (kind == "STUB") {
-    msg->kind = MSG_STUB;
-    msg->stub_count = Parse_Stubs(Rest(text, 1), msg->stubs);
     return true;
   }
   if (kind == "REROUTE") {
@@ -225,7 +197,7 @@ static void Handle_Line(const String &text)
     LOG("BLE: ignored \"%s\"\r\n", text.c_str());
     return;
   }
-  if (msg.kind != MSG_PATH && msg.kind != MSG_STUB && msg.kind != MSG_POSE && msg.kind != MSG_SPEED) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
+  if (msg.kind != MSG_ROUTE && msg.kind != MSG_POSE && msg.kind != MSG_SPEED) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
   portENTER_CRITICAL(&msg_lock);
   if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
     queue_head = (queue_head + 1) % QUEUE_SIZE;

@@ -6,11 +6,8 @@
 // The phone writes one UTF-8 line at a time to the "Nav" characteristic:
 //   L|400|MG Rd               next turn: L = left, R = right, S = straight, metres, road name
 //   TRIP|18:42|6.0            arrival time and kilometres left
-//   PATH|-2,-30;0,0;3,85;...  route around the rider in metres, heading-up (+x right, +y ahead),
-//                             the rider is the 0,0 point
-//   STUB|40,85,270,1;...      side streets: junction x,y (metres, same frame as PATH), the
-//                             street's direction in degrees clockwise from straight ahead, and
-//                             optionally ",1" when the junction is the turn (drawn long)
+//   RPATH|-2,-30;0,0;3,85;... route around the rider in metres, north-up (+x east, +y north),
+//                             relative to the rider at the latest POSE (the rider is 0,0)
 //   MAPBEGIN|7                start of map area 7 (roads around the rider, see Map_Layer.h)
 //   MAP|7|2|-120,40;-80,35;.. one road of area 7: class (1 major, 2 medium, 3 minor), points in
 //                             metres north-up from the area's reference point
@@ -27,9 +24,8 @@
 #define POD_NAV_CHAR_UUID     "50632787-1b5b-4788-a4ee-8ff5dc145962"
 
 #define NAV_PATH_MAX_POINTS   24
-#define NAV_MAX_STUBS         16
 
-enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_PATH, MSG_STUB, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
+enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_ROUTE, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
 
 struct Nav_Message {
   Msg_Kind kind;
@@ -46,15 +42,12 @@ struct Nav_Message {
   uint32_t speed_kmh;
   // MSG_SPEED
   float speed_mps;
-  // MSG_PATH
+  // MSG_ROUTE
   uint8_t path_count;
   int16_t path[NAV_PATH_MAX_POINTS][2];
   // MSG_POSE
   uint16_t area_id;
   int16_t pose[3];                          // x, y, heading
-  // MSG_STUB
-  uint8_t stub_count;
-  int16_t stubs[NAV_MAX_STUBS][4];        // x, y, angle, at-turn flag
 };
 
 void BLE_Link_Init(void);

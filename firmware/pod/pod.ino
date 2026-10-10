@@ -53,8 +53,7 @@ static void Pod_Tick(lv_timer_t *timer)
     switch (msg.kind) {
       case MSG_TURN:    Show_Turn(msg); break;
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
-      case MSG_PATH:    Nav_Screen_Set_Path(msg.path, msg.path_count); break;
-      case MSG_STUB:    Nav_Screen_Set_Stubs(msg.stubs, msg.stub_count); break;
+      case MSG_ROUTE:   Nav_Screen_Set_Route(msg.path, msg.path_count); break;
       case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
@@ -79,7 +78,12 @@ void setup()
   delay(120);                       // ms
   TCA9554PWR_Init(0x00);            // I/O expander: all pins output
   Set_EXIO(EXIO_PIN8, Low);         // buzzer off
-  LCD_Init();                       // screen, touch, backlight
+  // Start the screen from a task on core 0, so the screen's interrupts (which copy the picture
+  // from PSRAM to the panel continuously, ~36 MB/s) run on core 0 and leave core 1 to draw
+  static volatile bool lcd_ready = false;
+  xTaskCreatePinnedToCore([](void *) { LCD_Init(); lcd_ready = true; vTaskDelete(NULL); },
+                          "lcd_init", 4096, NULL, 5, NULL, 0);
+  while (!lcd_ready) delay(1);      // screen, touch, backlight
   Set_Backlight(100);               // full brightness for daylight
   Lvgl_Init();
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
@@ -102,9 +106,20 @@ static void Perf_Measure(uint32_t us)
     worst_us = LV_MAX(worst_us, us);
   }
   if (millis() - since_ms >= 2000) {
-    if (perf_report && !screenshot_sending)
+    extern uint32_t map_perf_roads_us, map_perf_fuel_us, map_perf_route_us, map_perf_draws;
+    extern uint32_t flush_perf_us, flush_perf_px;
+    if (perf_report && !screenshot_sending) {
       printf("PERF %lu frames in 2 s, avg %lu ms, worst %lu ms\r\n", (unsigned long)frames,
              (unsigned long)(frames ? total_us / frames / 1000 : 0), (unsigned long)(worst_us / 1000));
+      if (map_perf_draws)
+        printf("PERF map: %lu draw calls, per call roads %lu us, fuel %lu us, route %lu us\r\n",
+               (unsigned long)map_perf_draws, (unsigned long)(map_perf_roads_us / map_perf_draws / 1000),
+               (unsigned long)(map_perf_fuel_us / map_perf_draws / 1000), (unsigned long)(map_perf_route_us / map_perf_draws / 1000));
+    }
+    if (perf_report && !screenshot_sending)
+      printf("PERF flush: %lu ms total for %lu kpx\r\n", (unsigned long)(flush_perf_us / 1000), (unsigned long)(flush_perf_px / 1000));
+    map_perf_roads_us = map_perf_fuel_us = map_perf_route_us = map_perf_draws = 0;
+    flush_perf_us = flush_perf_px = 0;
     frames = total_us = worst_us = 0;
     since_ms = millis();
   }

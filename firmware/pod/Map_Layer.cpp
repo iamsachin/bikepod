@@ -1,9 +1,19 @@
 /*****************************************************************************
   | File        :   Map_Layer.cpp
-  | help        :   Draws the streets around the rider (see Map_Layer.h).
-                    Two buffers: the Bluetooth task fills one while the screen draws the other,
-                    and they swap when an area is complete, so a new area never flickers in.
+  | help        :   Streets, fuel stations and the route around the rider, drawn through a
+                    smoothly moving camera (see Map_Layer.h).
+
+  Areas: the Bluetooth task fills one buffer while the screen draws the other; they swap when
+  an area is complete, so a new area never flickers in.
+
+  Camera: GPS poses arrive about once a second. Each frame the camera is placed where the rider
+  should be by now (last pose + measured velocity and turn rate), so it moves continuously. When
+  a new pose arrives, the difference between where the camera was and the new prediction is kept
+  as an offset that fades out over CAM_SETTLE_S, so corrections never snap and there is no lag.
+  Zoom eases towards its target the same way.
 ******************************************************************************/
+// This file's drawing loops run for every map pixel: compile it for speed, not size (Arduino's -Os)
+#pragma GCC optimize("O2")
 #include "Map_Layer.h"
 #include <Arduino.h>
 #include <math.h>
@@ -11,8 +21,15 @@
 #define MAP_MAX_ROADS   400
 #define MAP_MAX_POINTS  2400
 #define MAP_MAX_FUEL    48
+#define ROUTE_MAX       256       // route points after its corners are rounded
 
-struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; };
+#define FRAME_MS        20        // camera update / redraw rate (~50 fps when moving)
+#define CAM_SETTLE_S    0.35f     // how quickly a correction from a new pose fades out
+#define ZOOM_EASE_S     0.6f      // how quickly the zoom follows its target
+#define PREDICT_MAX_S   1.5f      // stop predicting if poses stop coming
+#define ROUTE_BEND_PX   18.0f     // radius of the route's rounded corners on screen
+
+struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; int16_t cx, cy, radius; };
 
 struct Map_Area {
   uint16_t id;
@@ -32,21 +49,47 @@ static Map_Area *volatile ready = NULL;       // complete, waiting for the main 
 static portMUX_TYPE map_lock = portMUX_INITIALIZER_UNLOCKED;
 
 // Line widths and colours by road class: big roads a little wider and lighter
-static const lv_coord_t road_width[4] = { 0, 12, 9, 6 };
+static const lv_coord_t road_width[4] = { 0, 12, 8, 5 };
 static const uint32_t road_color[4] = { 0, 0x4A4A4A, 0x3A3A3A, 0x2C2C2C };
+
+// Route look (matches the turn screen)
+#define ROUTE_WIDTH     10
+#define ROUTE_CASING    3
+#define COLOR_ROUTE     0xD6D6D6
+#define COLOR_ROUTE_DONE 0x262626
 
 LV_FONT_DECLARE(font_fuel_14);       // Material Icons Round "local_gas_station" only
 #define FUEL_GLYPH  "\xEE\x95\x86"      // U+E546 in UTF-8
 #define FUEL_BADGE  20                    // badge diameter, px
 
 static lv_obj_t *layer;
-static lv_coord_t center_x, center_y;
-static float scale = 0;               // pixels per metre (set with the route drawing's zoom)
-// The rider's pose in up to two areas: while the phone switches to a new area it sends the pose
-// for both, so whichever area is on screen always has a matching pose (no flicker at the switch)
-struct Pose { bool valid; uint16_t area; float x, y, sin_h, cos_h; uint32_t at; };
+static lv_coord_t center_x, center_y;   // where the rider's marker is, inside the layer
+
+/* Poses, per area: while the phone switches to a new area it sends the pose for both, so
+   whichever area is on screen always has a matching pose (no blink at the switch). */
+struct Pose {
+  bool valid;
+  uint16_t area;
+  float x, y, heading;          // metres (area frame), degrees clockwise from north
+  float vx, vy, turn;           // metres/s and degrees/s, measured from successive poses
+  uint32_t at;                  // ms
+  float route_x, route_y;       // the latest route's origin in this area's frame
+  bool has_route;
+};
 static Pose poses[2];
-static const Pose *pose = NULL;         // the pose matching the area being drawn
+static Pose *pose = NULL;       // the pose matching the area being drawn
+
+// Camera (area frame) and zoom
+static float cam_x, cam_y, cam_h;
+static float off_x, off_y, off_h;   // correction left over from the last pose, fading out
+static uint32_t off_at;
+static float zoom = 0, zoom_target = 0;
+static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
+
+// Route, north-up metres relative to its origin, corners already rounded
+static float route[ROUTE_MAX][2];
+static uint16_t route_count = 0;
+
 static void Pick_Pose(void);
 
 /******************************* Bluetooth task side *******************************/
@@ -73,6 +116,15 @@ void Map_Data_Add_Road(uint16_t area_id, uint8_t road_class, const int16_t (*pts
     r.start = a->point_count;
     r.count = count;
     r.road_class = road_class;
+    // Bounding circle, so roads off screen can be skipped without looking at their points
+    int16_t lx = pts[0][0], hx = pts[0][0], ly = pts[0][1], hy = pts[0][1];
+    for (uint8_t i = 1; i < count; i++) {
+      lx = LV_MIN(lx, pts[i][0]); hx = LV_MAX(hx, pts[i][0]);
+      ly = LV_MIN(ly, pts[i][1]); hy = LV_MAX(hy, pts[i][1]);
+    }
+    r.cx = (lx + hx) / 2;
+    r.cy = (ly + hy) / 2;
+    r.radius = (int16_t)(sqrtf((float)(hx - lx) * (hx - lx) + (float)(hy - ly) * (hy - ly)) / 2 + 1);
     memcpy(a->points[a->point_count], pts, count * sizeof(a->points[0]));
     a->point_count += count;
   } else if (a) {
@@ -107,6 +159,465 @@ void Map_Data_End(uint16_t area_id, uint16_t road_count)
   portEXIT_CRITICAL(&map_lock);
 }
 
+/********************************* Camera *********************************/
+static float Wrap180(float d)
+{
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
+}
+
+// Where the rider should be now according to a pose and its measured motion
+static void Predict(const Pose *p, uint32_t now, float *x, float *y, float *h)
+{
+  float dt = fminf((uint32_t)(now - p->at) / 1000.0f, PREDICT_MAX_S);
+  *x = p->x + p->vx * dt;
+  *y = p->y + p->vy * dt;
+  *h = p->heading + p->turn * dt;
+}
+
+static void Update_Camera(uint32_t now)
+{
+  if (!pose) return;
+  float px, py, ph;
+  Predict(pose, now, &px, &py, &ph);
+  float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
+  cam_x = px + off_x * fade;
+  cam_y = py + off_y * fade;
+  cam_h = ph + off_h * fade;
+}
+
+static void Pick_Pose(void)
+{
+  pose = NULL;
+  for (int i = 0; i < 2; i++)
+    if (active && poses[i].valid && poses[i].area == active->id) pose = &poses[i];
+}
+
+void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
+{
+  uint32_t now = lv_tick_get();
+  int slot = poses[0].valid && poses[0].area == area_id ? 0
+           : poses[1].valid && poses[1].area == area_id ? 1
+           : (!poses[0].valid || (poses[1].valid && poses[0].at < poses[1].at)) ? 0 : 1;
+  Pose &p = poses[slot];
+  bool drawn = pose == &p;
+  float before_x = cam_x, before_y = cam_y, before_h = cam_h;   // camera as currently shown
+
+  if (p.valid && p.area == area_id) {
+    // Motion from the previous pose of this area, smoothed a little against GPS jitter
+    float dt = (uint32_t)(now - p.at) / 1000.0f;
+    if (dt > 0.05f && dt < 3) {
+      float vx = (x - p.x) / dt, vy = (y - p.y) / dt;
+      float turn = LV_CLAMP(-120.0f, Wrap180(heading_deg - p.heading) / dt, 120.0f);
+      p.vx = 0.5f * p.vx + 0.5f * vx;
+      p.vy = 0.5f * p.vy + 0.5f * vy;
+      p.turn = 0.5f * p.turn + 0.5f * turn;
+    } else if (dt >= 3) {
+      p.vx = p.vy = p.turn = 0;
+    }
+  } else {
+    p = Pose{};
+    p.area = area_id;
+  }
+  p.valid = true;
+  p.x = x;
+  p.y = y;
+  p.heading = p.heading + Wrap180(heading_deg - p.heading);   // keep it continuous (no 359 -> 0 jumps)
+  p.at = now;
+
+  Pick_Pose();
+  if (pose == &p) {
+    float nx, ny, nh;
+    Predict(&p, now, &nx, &ny, &nh);
+    if (drawn && drawn_x < 1e8) {
+      // Keep the camera where it is and let the difference fade out
+      off_x = before_x - nx;
+      off_y = before_y - ny;
+      off_h = Wrap180(before_h - nh);
+    } else {
+      off_x = off_y = off_h = 0;                   // first pose (or area just switched): start here
+    }
+    off_at = now;
+    Update_Camera(now);
+  }
+}
+
+void Map_Layer_Set_Target_Scale(float pixels_per_metre)
+{
+  zoom_target = pixels_per_metre;
+  if (zoom == 0) zoom = pixels_per_metre;
+}
+
+bool Map_Layer_Has_Map(void)
+{
+  return active && pose;
+}
+
+void Map_Layer_Clear(void)
+{
+  poses[0].valid = poses[1].valid = false;
+  pose = NULL;
+  route_count = 0;
+  drawn_x = 1e9;
+  if (layer) lv_obj_invalidate(layer);
+}
+
+/********************************* Route *********************************/
+// Replaces each corner of an open polyline with an arc of radius r (metres); ends stay put
+static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, float (*out)[2])
+{
+  uint16_t m = 0;
+  auto add = [&](float x, float y) { if (m < ROUTE_MAX) { out[m][0] = x; out[m][1] = y; m++; } };
+  if (n == 0) return 0;
+  add(in[0][0], in[0][1]);
+  for (uint8_t i = 1; i + 1 < n; i++) {
+    float bx = in[i][0], by = in[i][1];
+    float ux = in[i - 1][0] - bx, uy = in[i - 1][1] - by, lu = sqrtf(ux * ux + uy * uy);
+    float vx = in[i + 1][0] - bx, vy = in[i + 1][1] - by, lv = sqrtf(vx * vx + vy * vy);
+    if (lu < 0.5f || lv < 0.5f) { add(bx, by); continue; }
+    ux /= lu; uy /= lu; vx /= lv; vy /= lv;
+    float angle = acosf(LV_CLAMP(-1.0f, ux * vx + uy * vy, 1.0f));
+    if (angle > 3.05f) { add(bx, by); continue; }           // practically straight
+    float half = angle / 2;
+    float t = fminf(r_target / tanf(half), 0.45f * fminf(lu, lv));
+    float r = t * tanf(half);
+    float bisx = ux + vx, bisy = uy + vy, lb = sqrtf(bisx * bisx + bisy * bisy);
+    if (lb < 1e-3f || r < 0.2f) { add(bx, by); continue; }
+    float d = r / sinf(half);
+    float ox = bx + bisx / lb * d, oy = by + bisy / lb * d;
+    float a1 = atan2f(by + uy * t - oy, bx + ux * t - ox), a2 = atan2f(by + vy * t - oy, bx + vx * t - ox);
+    float sweep = a2 - a1;
+    while (sweep > (float)M_PI) sweep -= 2 * (float)M_PI;
+    while (sweep < -(float)M_PI) sweep += 2 * (float)M_PI;
+    int steps = LV_MAX(1, (int)ceilf(fabsf(sweep) / 0.3f));   // ~17 degrees a piece: smooth at this size
+    for (int k = 0; k <= steps; k++) {
+      float a = a1 + sweep * k / steps;
+      add(ox + r * cosf(a), oy + r * sinf(a));
+    }
+  }
+  add(in[n - 1][0], in[n - 1][1]);
+  return m;
+}
+
+void Map_Layer_Set_Route(const int16_t (*pts)[2], uint8_t count)
+{
+  // The route is relative to the rider at the time of the latest pose: note where that is in
+  // each area's frame, so the route stays put whichever area is drawn
+  for (int i = 0; i < 2; i++) {
+    poses[i].route_x = poses[i].x;
+    poses[i].route_y = poses[i].y;
+    poses[i].has_route = poses[i].valid;
+  }
+  static float in[32][2];
+  if (count > 32) count = 32;
+  for (uint8_t i = 0; i < count; i++) { in[i][0] = pts[i][0]; in[i][1] = pts[i][1]; }
+  float r = ROUTE_BEND_PX / fmaxf(zoom_target > 0 ? zoom_target : 1, 0.3f);
+  route_count = count >= 2 ? Round_Route(in, count, r, route) : 0;
+  if (layer) lv_obj_invalidate(layer);
+}
+
+void Map_Layer_Clear_Route(void)
+{
+  route_count = 0;
+  if (layer) lv_obj_invalidate(layer);
+}
+
+/********************************* Drawing *********************************
+ * Roads and the route are rasterised here, straight into LVGL's draw buffer: each segment is a
+ * capsule (a thick line with round ends) whose edge pixels are shaded by their distance to the
+ * line, so edges are smooth and positions keep sub-pixel precision (smoother motion).
+ * LVGL's own thick lines cost ~48 ms for a map frame; this is a few ms.
+ * The edge fade is applied as pixels are written (the background is black, so only map pixels
+ * ever need fading), instead of blending a fade image over the whole band every frame.
+ ****************************************************************************/
+uint32_t map_perf_roads_us = 0, map_perf_fuel_us = 0, map_perf_route_us = 0, map_perf_draws = 0;
+static float cam_sin, cam_cos;
+// Edge fade (towards the round screen's rim, and towards the top and bottom of the map band),
+// from small tables in internal RAM: a 94 KB per-pixel table in PSRAM made every pixel wait on
+// slow memory, and computing it per pixel (square roots) was slower still.
+#define FADE_MAX_ROWS   256
+#define RIM_LUT_SIZE    3700            // indexed by (dx^2 + dy^2) / 16, up to ~243 px from the centre
+bool fade_on = false;                   // (also switched by the serial "hide fade" test command)
+static uint8_t row_fade[FADE_MAX_ROWS];     // top/bottom fade per band row
+static int16_t clear_half[FADE_MAX_ROWS];   // half-width of the unfaded middle of each row (-1: none)
+static uint8_t rim_lut[RIM_LUT_SIZE];
+static lv_coord_t fade_box_y1 = -1, fade_box_h = 0;
+static float fade_top, fade_bottom, fade_r0, fade_r1;
+static const int screen_cx = 240, screen_cy = 240;
+
+void Map_Layer_Set_Fade(float top_px, float bottom_px, float rim_from, float rim_to)
+{
+  fade_top = top_px;
+  fade_bottom = bottom_px;
+  fade_r0 = rim_from;
+  fade_r1 = rim_to;
+  for (int i = 0; i < RIM_LUT_SIZE; i++) {
+    float r = sqrtf(i * 16.0f + 8);
+    float t = LV_CLAMP(0.0f, (r - rim_from) / (rim_to - rim_from), 1.0f);
+    rim_lut[i] = (uint8_t)(t * t * (3 - 2 * t) * 255);
+  }
+  fade_box_y1 = -1;                     // row tables are filled once the band's position is known
+  fade_on = true;
+}
+
+static void Fill_Row_Tables(const lv_area_t *box)
+{
+  fade_box_y1 = box->y1;
+  fade_box_h = LV_MIN(lv_area_get_height(box), FADE_MAX_ROWS);
+  for (int i = 0; i < fade_box_h; i++) {
+    float in_band = i + 0.5f;
+    float t1 = LV_CLAMP(0.0f, in_band / fade_top, 1.0f), t2 = LV_CLAMP(0.0f, (fade_box_h - in_band) / fade_bottom, 1.0f);
+    float top = 1 - t1 * t1 * (3 - 2 * t1), bottom = 1 - t2 * t2 * (3 - 2 * t2);
+    row_fade[i] = (uint8_t)(LV_MAX(top, bottom) * 255);
+    float dy = box->y1 + i + 0.5f - screen_cy;
+    clear_half[i] = fade_r0 * fade_r0 > dy * dy ? (int16_t)sqrtf(fade_r0 * fade_r0 - dy * dy) : -1;
+  }
+}
+
+struct Fade_Row { uint32_t row; int clear_half; int dy2; };
+
+static inline Fade_Row Row_Fade(int y)
+{
+  int i = LV_CLAMP(0, y - fade_box_y1, fade_box_h - 1);
+  int dy = y - screen_cy;
+  return { row_fade[i], clear_half[i], dy * dy };
+}
+
+static inline uint32_t Pixel_Fade(const Fade_Row &f, int x)
+{
+  int dx = x - screen_cx;
+  if (dx <= f.clear_half && -dx <= f.clear_half) return f.row;     // inside the clear circle
+  uint32_t rim = rim_lut[LV_MIN((dx * dx + f.dy2) >> 4, RIM_LUT_SIZE - 1)];
+  return LV_MAX(rim, f.row);
+}
+
+struct Pt { float x, y; };
+
+// Area metres -> screen pixels (floats: sub-pixel precision)
+static inline Pt To_Screen(const lv_area_t *box, float x, float y)
+{
+  float dx = x - cam_x, dy = y - cam_y;
+  float right = dx * cam_cos - dy * cam_sin;
+  float ahead = dx * cam_sin + dy * cam_cos;
+  return { box->x1 + center_x + right * zoom, box->y1 + center_y - ahead * zoom };
+}
+
+struct Raster {
+  lv_color_t *buf;              // LVGL's draw buffer
+  lv_area_t buf_area;           // its position on screen
+  lv_coord_t buf_w;
+  lv_area_t clip;               // part of it being drawn now
+  lv_area_t box;                // the map layer on screen (for the fade table)
+};
+
+// Draws one capsule from a to b: `color` out to `core` px from the line, then `edge_color` out to
+// `half` (a casing; pass core = half for a plain line), blending by coverage x fade
+static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color);
+
+static void Capsule(const Raster &r, Pt a, Pt b, float half, lv_color_t color)
+{
+  Capsule2(r, a, b, half, color, half, color);
+}
+
+uint32_t map_perf_capsules = 0, map_perf_pixels = 0;
+
+// In IRAM: running from flash, the loop's code kept being evicted from the cache it shares with PSRAM
+IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color)
+{
+  map_perf_capsules++;
+  const float reach = half + 0.6f;                  // how far from the line a pixel centre can be touched
+  float minx = fminf(a.x, b.x) - reach, maxx = fmaxf(a.x, b.x) + reach;
+  float miny = fminf(a.y, b.y) - reach, maxy = fmaxf(a.y, b.y) + reach;
+  int x1 = LV_MAX((int)floorf(minx), r.clip.x1), x2 = LV_MIN((int)ceilf(maxx), r.clip.x2);
+  int y1 = LV_MAX((int)floorf(miny), r.clip.y1), y2 = LV_MIN((int)ceilf(maxy), r.clip.y2);
+  if (x1 > x2 || y1 > y2) return;
+
+  float dx = b.x - a.x, dy = b.y - a.y, len = sqrtf(dx * dx + dy * dy);
+  if (len < 1e-3f) { dx = 1e-3f; dy = 0; len = 1e-3f; }
+  float ux = dx / len, uy = dy / len;               // along the segment
+  const int32_t len_q = (int32_t)(len * 256);
+  const int32_t in_q = (int32_t)(LV_MAX(half - 0.5f, 0.0f) * 256), out_q = (int32_t)((half + 0.5f) * 256);
+  const bool casing = core < half;
+  const int32_t core_lo_q = (int32_t)((core - 0.5f) * 256), core_hi_q = (int32_t)((core + 0.5f) * 256);
+
+  for (int y = y1; y <= y2; y++) {
+    float py = y + 0.5f - a.y;
+    // Only the stretch of this row the capsule can touch (not the whole bounding box, which
+    // for a long diagonal is most of the screen)
+    float t0 = 0, t1 = 1;
+    if (fabsf(dy) > 1e-4f) {
+      t0 = (py - reach) / dy;
+      t1 = (py + reach) / dy;
+      if (t0 > t1) { float s = t0; t0 = t1; t1 = s; }
+      t0 = LV_MAX(t0, 0.0f);
+      t1 = LV_MIN(t1, 1.0f);
+      if (t0 > t1) continue;
+    } else if (fabsf(py) > reach) {
+      continue;
+    }
+    float sx0 = a.x + dx * t0, sx1 = a.x + dx * t1;
+    int rx1 = LV_MAX(x1, (int)floorf(fminf(sx0, sx1) - reach));
+    int rx2 = LV_MIN(x2, (int)ceilf(fmaxf(sx0, sx1) + reach));
+    if (rx1 > rx2) continue;
+
+    lv_color_t *row = r.buf + (y - r.buf_area.y1) * r.buf_w - r.buf_area.x1;
+    Fade_Row fr;
+    if (fade_on) {
+      fr = Row_Fade(y);
+      if (fr.row >= 250) continue;                  // this whole row is faded to black
+    }
+    map_perf_pixels += rx2 - rx1 + 1;
+    // Distance across the line and position along it, in 1/256 px, change by a constant per
+    // pixel: integer adds only (floating point here cost ~70 cycles a pixel)
+    float px = rx1 + 0.5f - a.x;
+    int32_t across = (int32_t)((px * -uy + py * ux) * 256), along = (int32_t)((px * ux + py * uy) * 256);
+    const int32_t step_across = (int32_t)(-uy * 256), step_along = (int32_t)(ux * 256);
+    for (int x = rx1; x <= rx2; x++, across += step_across, along += step_along) {
+      int32_t d;
+      if (along >= 0 && along <= len_q) {
+        d = across < 0 ? -across : across;          // beside the segment
+      } else {
+        float ex = (along < 0 ? along : along - len_q) / 256.0f, ey = across / 256.0f;
+        d = (int32_t)(sqrtf(ex * ex + ey * ey) * 256);  // beyond an end: distance to that end
+      }
+      if (d >= out_q) continue;
+      uint32_t cover = d <= in_q ? 255 : (uint32_t)((out_q - d) * 255) >> 8;
+      lv_color_t col = color;
+      if (casing && d > core_lo_q) {
+        int32_t inside = core_hi_q - d;             // 1 px blend from line colour to casing
+        col = inside <= 0 ? edge_color : lv_color_mix(color, edge_color, (lv_opa_t)((inside * 255) >> 8));
+      }
+      if (fade_on) {
+        uint32_t f = Pixel_Fade(fr, x);
+        if (f >= 250) continue;
+        cover = (cover * (256 - f)) >> 8;
+      }
+      if (cover >= 250) row[x] = col;
+      else if (cover > 4) row[x] = lv_color_mix(col, row[x], (lv_opa_t)cover);
+    }
+  }
+}
+
+// Draws a polyline (area metres, offset by ox, oy) as capsules; `from` replaces the first point
+static void Polyline(const Raster &r, const float (*pts)[2], uint16_t n, float ox, float oy,
+                     const Pt *from, float half, lv_color_t color, float core, lv_color_t edge_color)
+{
+  if (n == 0) return;
+  Pt prev = from ? *from : To_Screen(&r.box, ox + pts[0][0], oy + pts[0][1]);
+  for (uint16_t i = from ? 0 : 1; i < n; i++) {
+    Pt next = To_Screen(&r.box, ox + pts[i][0], oy + pts[i][1]);
+    Capsule2(r, prev, next, half, color, core, edge_color);
+    prev = next;
+  }
+}
+
+static void Draw_Route(const Raster &r)
+{
+  if (route_count < 2 || !pose->has_route) return;
+  float ox = pose->route_x, oy = pose->route_y;
+
+  // Split where the camera is: nearest point on the route
+  float best = 1e18f, px = 0, py = 0;
+  uint16_t split = 0;
+  for (uint16_t i = 0; i + 1 < route_count; i++) {
+    float ax = ox + route[i][0], ay = oy + route[i][1];
+    float bx = ox + route[i + 1][0], by = oy + route[i + 1][1];
+    float dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? LV_CLAMP(0.0f, ((cam_x - ax) * dx + (cam_y - ay) * dy) / len2, 1.0f) : 0;
+    float qx = ax + t * dx, qy = ay + t * dy;
+    float d2 = (qx - cam_x) * (qx - cam_x) + (qy - cam_y) * (qy - cam_y);
+    if (d2 < best) { best = d2; split = i; px = qx; py = qy; }
+  }
+  Pt here = To_Screen(&r.box, px, py);
+
+  // Each part in one pass: the line with its black casing around it (behind: dim, ahead: bright)
+  const float behind = (ROUTE_WIDTH - 2) / 2.0f, ahead = ROUTE_WIDTH / 2.0f;
+  lv_color_t black = lv_color_black();
+  Polyline(r, route, split + 1, ox, oy, NULL, behind + ROUTE_CASING, lv_color_hex(COLOR_ROUTE_DONE), behind, black);
+  Capsule2(r, To_Screen(&r.box, ox + route[split][0], oy + route[split][1]), here,
+           behind + ROUTE_CASING, lv_color_hex(COLOR_ROUTE_DONE), behind, black);
+  Polyline(r, route + split + 1, route_count - split - 1, ox, oy, &here,
+           ahead + ROUTE_CASING, lv_color_hex(COLOR_ROUTE), ahead, black);
+}
+
+static void Draw_Event(lv_event_t *e)
+{
+  if (!pose || zoom <= 0) return;
+  uint32_t t0 = micros();
+  map_perf_draws++;
+  lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+  Raster r;
+  r.buf = (lv_color_t *)ctx->buf;
+  r.buf_area = *ctx->buf_area;
+  r.buf_w = lv_area_get_width(ctx->buf_area);
+  r.clip = *ctx->clip_area;
+  lv_obj_get_coords(layer, &r.box);
+  if (fade_box_y1 != r.box.y1) Fill_Row_Tables(&r.box);
+  float h = cam_h * (float)M_PI / 180;
+  cam_sin = sinf(h);
+  cam_cos = cosf(h);
+
+  if (active) {
+    // Minor roads first, so bigger roads are drawn over them
+    for (int cls = 3; cls >= 1; cls--) {
+      float half = road_width[cls] / 2.0f;
+      lv_color_t color = lv_color_hex(road_color[cls]);
+      for (uint16_t i = 0; i < active->road_count; i++) {
+        const Map_Road &road = active->roads[i];
+        if (road.road_class != cls) continue;
+        Pt c = To_Screen(&r.box, road.cx, road.cy);
+        float rr = road.radius * zoom + half + 1;
+        if (c.x + rr < r.clip.x1 || c.x - rr > r.clip.x2 || c.y + rr < r.clip.y1 || c.y - rr > r.clip.y2) continue;
+        const int16_t *p0 = active->points[road.start];
+        Pt prev = To_Screen(&r.box, p0[0], p0[1]);
+        for (uint8_t k = 1; k < road.count; k++) {
+          const int16_t *p = active->points[road.start + k];
+          Pt next = To_Screen(&r.box, p[0], p[1]);
+          Capsule(r, prev, next, half, color);
+          prev = next;
+        }
+      }
+    }
+    uint32_t t1 = micros();
+    map_perf_roads_us += t1 - t0;
+    t0 = t1;
+
+    // Fuel stations: a small dark round badge with an amber pump, kept upright as the map turns
+    // (skipped where the edge fade would hide it, since LVGL draws these without the fade)
+    lv_draw_rect_dsc_t badge;
+    lv_draw_rect_dsc_init(&badge);
+    badge.radius = LV_RADIUS_CIRCLE;
+    badge.bg_color = lv_color_hex(0x1E1E1E);
+    badge.bg_opa = LV_OPA_COVER;
+    badge.border_color = lv_color_hex(0x4A4A4A);
+    badge.border_width = 1;
+    badge.border_opa = LV_OPA_COVER;
+    lv_draw_label_dsc_t icon;
+    lv_draw_label_dsc_init(&icon);
+    icon.font = &font_fuel_14;
+    icon.color = lv_color_hex(0xF2B544);
+    const lv_coord_t br = FUEL_BADGE / 2;
+    for (uint8_t i = 0; i < active->fuel_count; i++) {
+      Pt f = To_Screen(&r.box, active->fuel[i][0], active->fuel[i][1]);
+      lv_coord_t sx = (lv_coord_t)lroundf(f.x), sy = (lv_coord_t)lroundf(f.y);
+      lv_area_t area = { (lv_coord_t)(sx - br), (lv_coord_t)(sy - br), (lv_coord_t)(sx + br - 1), (lv_coord_t)(sy + br - 1) };
+      if (area.x2 < r.clip.x1 || area.x1 > r.clip.x2 || area.y2 < r.clip.y1 || area.y1 > r.clip.y2) continue;
+      if (fade_on && (sx < r.box.x1 || sx > r.box.x2 || sy < r.box.y1 || sy > r.box.y2 ||
+                      Pixel_Fade(Row_Fade(sy), sx) > 100)) continue;
+      lv_draw_rect(ctx, &badge, &area);
+      lv_area_t glyph = { (lv_coord_t)(sx - 7), (lv_coord_t)(sy - font_fuel_14.line_height / 2),
+                          (lv_coord_t)(sx + 7), (lv_coord_t)(sy + font_fuel_14.line_height / 2) };
+      lv_draw_label(ctx, &icon, &glyph, FUEL_GLYPH, NULL);
+    }
+    map_perf_fuel_us += micros() - t0;
+  }
+
+  t0 = micros();
+  Draw_Route(r);
+  map_perf_route_us += micros() - t0;
+}
+
 /********************************* Main loop side *********************************/
 void Map_Layer_Poll(void)
 {
@@ -121,119 +632,34 @@ void Map_Layer_Poll(void)
   }
   portEXIT_CRITICAL(&map_lock);
   if (next) {
+    Pose *before = pose;
     Pick_Pose();
+    // Switching area: the camera continues from the same place (frames differ only by a shift,
+    // which the new area's pose already accounts for)
+    if (pose && pose != before) {
+      uint32_t now = lv_tick_get();
+      float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
+      off_x *= fade; off_y *= fade; off_h *= fade;
+      off_at = now;
+    }
     if (layer) lv_obj_invalidate(layer);
   }
 }
 
-static void Pick_Pose(void)
+// Every frame: move the camera and zoom, and redraw only if the picture actually changes
+static void Frame(lv_timer_t *timer)
 {
-  pose = NULL;
-  for (int i = 0; i < 2; i++)
-    if (active && poses[i].valid && poses[i].area == active->id) pose = &poses[i];
-}
-
-void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
-{
-  // Update this area's slot, or replace the older slot
-  int slot = poses[0].valid && poses[0].area == area_id ? 0
-           : poses[1].valid && poses[1].area == area_id ? 1
-           : (!poses[0].valid || (poses[1].valid && poses[0].at < poses[1].at)) ? 0 : 1;
-  float h = heading_deg * (float)M_PI / 180;
-  poses[slot] = { true, area_id, (float)x, (float)y, sinf(h), cosf(h), lv_tick_get() };
-  Pick_Pose();
-  if (layer && pose == &poses[slot]) lv_obj_invalidate(layer);
-}
-
-void Map_Layer_Set_Scale(float pixels_per_metre)
-{
-  if (fabsf(pixels_per_metre - scale) < 0.0005f) return;
-  scale = pixels_per_metre;
-  if (layer) lv_obj_invalidate(layer);
-}
-
-bool Map_Layer_Has_Map(void)
-{
-  return active && pose;
-}
-
-void Map_Layer_Clear(void)
-{
-  poses[0].valid = poses[1].valid = false;
-  pose = NULL;
-  if (layer) lv_obj_invalidate(layer);
-}
-
-// Rotate the area's north-up metres into the rider's heading-up view, in screen pixels
-static inline lv_point_t To_Screen(const lv_area_t *box, const int16_t *p)
-{
-  float dx = p[0] - pose->x, dy = p[1] - pose->y;
-  float right = dx * pose->cos_h - dy * pose->sin_h;
-  float ahead = dx * pose->sin_h + dy * pose->cos_h;
-  lv_point_t s = { (lv_coord_t)lroundf(box->x1 + center_x + right * scale),
-                   (lv_coord_t)lroundf(box->y1 + center_y - ahead * scale) };
-  return s;
-}
-
-static void Draw_Event(lv_event_t *e)
-{
-  if (!Map_Layer_Has_Map() || scale <= 0) return;
-  lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
-  lv_area_t box;
-  lv_obj_get_coords(layer, &box);
-  const lv_area_t *clip = ctx->clip_area;
-
-  lv_draw_line_dsc_t dsc;
-  lv_draw_line_dsc_init(&dsc);
-  dsc.round_start = 1;
-  dsc.round_end = 1;
-
-  // Minor roads first, so bigger roads are drawn over them
-  for (int cls = 3; cls >= 1; cls--) {
-    dsc.width = road_width[cls];
-    dsc.color = lv_color_hex(road_color[cls]);
-    lv_coord_t pad = dsc.width;
-    for (uint16_t r = 0; r < active->road_count; r++) {
-      const Map_Road &road = active->roads[r];
-      if (road.road_class != cls) continue;
-      lv_point_t prev = To_Screen(&box, active->points[road.start]);
-      for (uint8_t i = 1; i < road.count; i++) {
-        lv_point_t next = To_Screen(&box, active->points[road.start + i]);
-        // Skip segments wholly outside the area being redrawn
-        bool outside = (prev.x < clip->x1 - pad && next.x < clip->x1 - pad) ||
-                       (prev.x > clip->x2 + pad && next.x > clip->x2 + pad) ||
-                       (prev.y < clip->y1 - pad && next.y < clip->y1 - pad) ||
-                       (prev.y > clip->y2 + pad && next.y > clip->y2 + pad);
-        if (!outside) lv_draw_line(ctx, &dsc, &prev, &next);
-        prev = next;
-      }
-    }
-  }
-
-  // Fuel stations: a small dark round badge with an amber pump, kept upright as the map turns
-  if (active->fuel_count == 0) return;
-  lv_draw_rect_dsc_t badge;
-  lv_draw_rect_dsc_init(&badge);
-  badge.radius = LV_RADIUS_CIRCLE;
-  badge.bg_color = lv_color_hex(0x1E1E1E);
-  badge.bg_opa = LV_OPA_COVER;
-  badge.border_color = lv_color_hex(0x4A4A4A);
-  badge.border_width = 1;
-  badge.border_opa = LV_OPA_COVER;
-  lv_draw_label_dsc_t icon;
-  lv_draw_label_dsc_init(&icon);
-  icon.font = &font_fuel_14;
-  icon.color = lv_color_hex(0xF2B544);
-  const lv_coord_t r = FUEL_BADGE / 2;
-  for (uint8_t i = 0; i < active->fuel_count; i++) {
-    lv_point_t s = To_Screen(&box, active->fuel[i]);
-    lv_area_t area = { (lv_coord_t)(s.x - r), (lv_coord_t)(s.y - r), (lv_coord_t)(s.x + r - 1), (lv_coord_t)(s.y + r - 1) };
-    if (area.x2 < clip->x1 || area.x1 > clip->x2 || area.y2 < clip->y1 || area.y1 > clip->y2) continue;
-    lv_draw_rect(ctx, &badge, &area);
-    // The glyph's box inside its 14 px line: centre it in the badge
-    lv_area_t glyph = { (lv_coord_t)(s.x - 7), (lv_coord_t)(s.y - font_fuel_14.line_height / 2),
-                        (lv_coord_t)(s.x + 7), (lv_coord_t)(s.y + font_fuel_14.line_height / 2) };
-    lv_draw_label(ctx, &icon, &glyph, FUEL_GLYPH, NULL);
+  static uint32_t last = 0;
+  uint32_t now = lv_tick_get();
+  float dt = last ? (uint32_t)(now - last) / 1000.0f : 0;
+  last = now;
+  if (zoom_target > 0) zoom += (zoom_target - zoom) * (1 - expf(-dt / ZOOM_EASE_S));
+  if (!pose || !layer) return;
+  Update_Camera(now);
+  float moved_px = sqrtf((cam_x - drawn_x) * (cam_x - drawn_x) + (cam_y - drawn_y) * (cam_y - drawn_y)) * zoom;
+  if (moved_px > 0.3f || fabsf(cam_h - drawn_h) > 0.15f || fabsf(zoom - drawn_zoom) > 0.002f * zoom) {
+    drawn_x = cam_x; drawn_y = cam_y; drawn_h = cam_h; drawn_zoom = zoom;
+    lv_obj_invalidate(layer);
   }
 }
 
@@ -247,5 +673,40 @@ lv_obj_t *Map_Layer_Create(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coor
   center_x = marker_x;
   center_y = marker_y;
   areas[0].id = areas[1].id = 0xFFFF;
+  lv_timer_create(Frame, FRAME_MS, NULL);
   return layer;
+}
+
+// Serial "cam": camera and data state, for debugging
+void Map_Layer_Debug_Print(void)
+{
+  printf("CAM pose=%d active=%d roads=%u route=%u cam=%.1f,%.1f h=%.1f zoom=%.3f->%.3f off=%.1f,%.1f,%.1f\r\n",
+         pose ? (int)pose->area : -1, active ? (int)active->id : -1, active ? active->road_count : 0, route_count,
+         cam_x, cam_y, cam_h, zoom, zoom_target, off_x, off_y, off_h);
+  if (pose) printf("CAM pose x=%.1f y=%.1f h=%.1f v=%.2f,%.2f turn=%.2f route_at=%.1f,%.1f has=%d\r\n",
+                   pose->x, pose->y, pose->heading, pose->vx, pose->vy, pose->turn, pose->route_x, pose->route_y, pose->has_route);
+}
+
+// Serial "rastbench": the capsule loop alone, into an internal-RAM buffer
+void Map_Layer_Raster_Bench(void)
+{
+  static lv_color_t test_buf[480 * 20];
+  Raster r;
+  r.buf = test_buf;
+  r.buf_area = { 0, 0, 479, 19 };
+  r.buf_w = 480;
+  r.clip = r.buf_area;
+  r.box = { 0, 0, 479, 195 };
+  bool was = fade_on;
+  fade_on = false;
+  map_perf_pixels = 0;
+  uint32_t t0 = micros();
+  for (int i = 0; i < 500; i++) {
+    Pt a = { 10.0f + (i % 40) * 11, 2.0f }, b = { 60.0f + (i % 40) * 11, 17.0f };
+    Capsule2(r, a, b, 4.0f, lv_color_white(), 4.0f, lv_color_white());
+  }
+  uint32_t us = micros() - t0;
+  fade_on = was;
+  printf("RAST 500 capsules: %lu us, %lu pixels checked, %lu ns per pixel\r\n",
+         (unsigned long)us, (unsigned long)map_perf_pixels, (unsigned long)(us * 1000ULL / LV_MAX(map_perf_pixels, 1u)));
 }

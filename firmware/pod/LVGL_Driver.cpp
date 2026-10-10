@@ -29,9 +29,14 @@ void Lvgl_print(const char * buf)
     Displays LVGL content on the LCD
     This function implements associating LVGL data to the LCD screen
 */
+uint32_t flush_perf_us = 0, flush_perf_px = 0;   // for the serial "perf" report
+
 void Lvgl_Display_LCD( lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p )
 {
+  uint32_t t0 = micros();
   LCD_addWindow(area->x1, area->y1, area->x2, area->y2, ( uint8_t *)&color_p->full);
+  flush_perf_us += micros() - t0;
+  flush_perf_px += (area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1);
   lv_disp_flush_ready( disp_drv );
 }
 /*Read the touchpad*/
@@ -61,9 +66,9 @@ void Lvgl_Init(void)
   lv_init();
   // esp_lcd_rgb_panel_get_frame_buffer(panel_handle, 2, &buf1, &buf2);                                          
   
-  buf1 = (lv_color_t*) heap_caps_malloc(LVGL_BUF_LEN, MALLOC_CAP_SPIRAM);
-  buf2 = (lv_color_t*) heap_caps_malloc(LVGL_BUF_LEN, MALLOC_CAP_SPIRAM);
-  lv_disp_draw_buf_init( &draw_buf, buf1, buf2, ESP_PANEL_LCD_WIDTH * ESP_PANEL_LCD_HEIGHT);                    
+  buf1 = (lv_color_t*) heap_caps_malloc(LVGL_BUF_LEN, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  buf2 = (lv_color_t*) heap_caps_malloc(LVGL_BUF_LEN, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  lv_disp_draw_buf_init( &draw_buf, buf1, buf2, LVGL_WIDTH * LVGL_BUF_LINES);                    
 
   /*Initialize the display*/
   lv_disp_drv_init( &disp_drv );

@@ -51,8 +51,7 @@ final class Navigator {
     @ObservationIgnored private var lastPodSent: [String: (line: String, at: Date)] = [:]
     @ObservationIgnored private var turnLine = ""          // latest "R|400|MG Rd" while navigating
     @ObservationIgnored private var tripLine = ""          // latest "TRIP|18:42|6.0"
-    @ObservationIgnored private var pathLine = ""          // latest "PATH|..." route drawing
-    @ObservationIgnored private var stubLine = ""          // latest "STUB|..." side streets
+    @ObservationIgnored private var pathLine = ""          // latest "RPATH|..." route for the pod's map
     @ObservationIgnored private var poseLine = ""          // latest "POSE|..." rider in the map area
     @ObservationIgnored private var previousPoseLine = ""  // same, in the previous area (see MapFeed)
     @ObservationIgnored private var mapSentForConnection = -1
@@ -167,7 +166,6 @@ final class Navigator {
             turnLine = ""
             tripLine = ""
             pathLine = ""
-            stubLine = ""
             poseLine = ""
             pathAlong = nil
             phase = .navigating
@@ -192,7 +190,6 @@ final class Navigator {
         turnLine = ""
         tripLine = ""
         pathLine = ""
-        stubLine = ""
         poseLine = ""
         if phase != .idle { phase = .idle }
         updatePod()
@@ -233,8 +230,15 @@ final class Navigator {
                                          metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
                                          junctions: junctions) {
             pathAlong = result.along
-            pathLine = "PATH|" + result.shape.map { "\($0.x),\($0.y)" }.joined(separator: ";")
-            // Street map: same origin and heading as the route drawing, so they line up
+            // The pod draws the route on its map through a moving camera, so it wants the route
+            // north-up around the same origin as POSE (turn the heading-up shape back)
+            let h = result.headingDegrees * .pi / 180
+            pathLine = "RPATH|" + result.shape.map { p -> String in
+                let right = Double(p.x), ahead = Double(p.y)
+                let east = right * cos(h) + ahead * sin(h), north = -right * sin(h) + ahead * cos(h)
+                return "\(Int(east.rounded())),\(Int(north.rounded()))"
+            }.joined(separator: ";")
+            // Street map: same origin and heading as the route, so they line up
             let origin = result.origin
             poseLine = mapFeed.pose(lat: origin.lat, lng: origin.lng, headingDegrees: result.headingDegrees) ?? ""
             previousPoseLine = mapFeed.previousPose(lat: origin.lat, lng: origin.lng,
@@ -242,8 +246,6 @@ final class Navigator {
             if mapFeed.needsArea(lat: origin.lat, lng: origin.lng) {
                 mapFeed.buildArea(lat: origin.lat, lng: origin.lng) { [weak self] lines in self?.sendMapArea(lines) }
             }
-            stubLine = "STUB|" + result.stubs.map { "\($0.x),\($0.y),\($0.angle)" + ($0.atTurn ? ",1" : "") }
-                .joined(separator: ";")
         }
         updatePod()
     }
@@ -272,9 +274,10 @@ final class Navigator {
         case .navigating:
             if rerouting { return [("state", "REROUTE")] + (tripLine.isEmpty ? [] : [("trip", tripLine)]) }
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
-            // Turn first: the pod sizes the route drawing from the turn distance
+            // Turn first (the pod zooms from the turn distance), poses before the route (the pod
+            // anchors the route to the latest pose)
             return [("turn", turnLine), ("pose", poseLine), ("pose_prev", previousPoseLine), ("path", pathLine),
-                    ("stub", stubLine), ("trip", tripLine)]
+                    ("trip", tripLine)]
                 .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())

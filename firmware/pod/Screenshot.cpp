@@ -9,6 +9,8 @@
 #include "Display_ST7701.h"
 #include "BLE_Link.h"
 #include "Pages.h"
+#include "Nav_Screen.h"
+#include "Map_Layer.h"
 #include "Lean_Screen.h"
 #include "Gyro_QMI8658.h"
 #include <lvgl.h>
@@ -80,6 +82,15 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
       else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
       else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
+      else if (strcmp(cmd, "cam") == 0) Map_Layer_Debug_Print();
+      else if (strcmp(cmd, "bench") == 0) Nav_Screen_Bench();
+      else if (strcmp(cmd, "rastbench") == 0) Map_Layer_Raster_Bench();
+      else if (strcmp(cmd, "cpu") == 0) printf("CPU %lu MHz, free internal %lu, free psram %lu\r\n", (unsigned long)getCpuFrequencyMhz(),
+                                              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+      else if (strcmp(cmd, "hide fade") == 0) { extern bool fade_on; fade_on = false; }
+      else if (strcmp(cmd, "show fade") == 0) { extern bool fade_on; fade_on = true; }
+      else if (strncmp(cmd, "hide ", 5) == 0) Nav_Screen_Debug(cmd + 5, true);
+      else if (strncmp(cmd, "show ", 5) == 0) Nav_Screen_Debug(cmd + 5, false);
       else if (strcmp(cmd, "mem") == 0) {
         lv_mem_monitor_t m;
         lv_mem_monitor(&m);

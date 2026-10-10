@@ -8,7 +8,11 @@
 
 #define LVGL_WIDTH     ESP_PANEL_LCD_WIDTH
 #define LVGL_HEIGHT    ESP_PANEL_LCD_HEIGHT
-#define LVGL_BUF_LEN  (LVGL_WIDTH * LVGL_HEIGHT * sizeof(lv_color_t))
+// LVGL draws into two 20-line buffers in fast internal RAM (it renders a frame in strips): the
+// map's pixel-by-pixel drawing is several times slower into PSRAM. Kept small because Bluetooth
+// needs internal RAM at start-up (2 x 40 lines plus other buffers left it short).
+#define LVGL_BUF_LINES 20
+#define LVGL_BUF_LEN  (LVGL_WIDTH * LVGL_BUF_LINES * sizeof(lv_color_t))
 
 #define EXAMPLE_LVGL_TICK_PERIOD_MS  2
 
