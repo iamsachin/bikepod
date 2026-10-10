@@ -131,6 +131,7 @@ static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
 
 // Route, north-up metres relative to its origin, corners already rounded
 static float route[ROUTE_MAX][2];
+static float route_along[ROUTE_MAX];    // distance along the route to each point, metres
 static uint16_t route_count = 0;
 
 static void Refresh_Pose(void);
@@ -217,10 +218,48 @@ static void Refresh_Pose(void)
   pose_ok = active && last_pose.valid && Convert(last_pose.area, last_pose.x, last_pose.y, active->id, &pose_x, &pose_y);
 }
 
-// Where the rider should be now (area on screen) according to the latest pose and its motion
+// A point `s` metres along the route (route-relative coordinates)
+static void Route_Point(float s, float *x, float *y)
+{
+  s = LV_CLAMP(0.0f, s, route_along[route_count - 1]);
+  uint16_t i = 0;
+  while (i + 2 < route_count && route_along[i + 1] < s) i++;
+  float seg = route_along[i + 1] - route_along[i];
+  float t = seg > 0 ? (s - route_along[i]) / seg : 0;
+  *x = route[i][0] + t * (route[i + 1][0] - route[i][0]);
+  *y = route[i][1] + t * (route[i + 1][1] - route[i][1]);
+}
+
+// Where the rider should be now (area on screen). On the route, the prediction moves along the
+// route at the rider's speed and takes the route's direction (a straight-line guess left the
+// route on every bend, so the arrow drifted off the line). Off the route: straight line.
 static void Predict(uint32_t now, float *x, float *y, float *h)
 {
   float dt = fminf((uint32_t)(now - last_pose.at) / 1000.0f, PREDICT_MAX_S);
+  float ox, oy;
+  if (has_route && route_count >= 2 && Convert(route_area, route_ox, route_oy, active->id, &ox, &oy)) {
+    // Where the latest pose sits on the route
+    float px = pose_x - ox, py = pose_y - oy, best = 1e18f, s0 = 0;
+    for (uint16_t i = 0; i + 1 < route_count; i++) {
+      float ax = route[i][0], ay = route[i][1], dx = route[i + 1][0] - ax, dy = route[i + 1][1] - ay;
+      float len2 = dx * dx + dy * dy;
+      float t = len2 > 0 ? LV_CLAMP(0.0f, ((px - ax) * dx + (py - ay) * dy) / len2, 1.0f) : 0;
+      float qx = ax + t * dx - px, qy = ay + t * dy - py, d2 = qx * qx + qy * qy;
+      if (d2 < best) { best = d2; s0 = route_along[i] + t * sqrtf(len2); }
+    }
+    if (best < 25.0f * 25.0f) {
+      float s = s0 + hypotf(last_pose.vx, last_pose.vy) * dt;
+      float rx, ry, ax, ay, bx, by;
+      Route_Point(s, &rx, &ry);
+      Route_Point(s - 4, &ax, &ay);           // direction of the route around that point
+      Route_Point(s + 4, &bx, &by);
+      *x = ox + rx;
+      *y = oy + ry;
+      float route_h = atan2f(bx - ax, by - ay) * 180 / (float)M_PI;   // degrees clockwise from north
+      *h = last_pose.heading + Wrap180(route_h - last_pose.heading);
+      return;
+    }
+  }
   *x = pose_x + last_pose.vx * dt;
   *y = pose_y + last_pose.vy * dt;
   *h = last_pose.heading + last_pose.turn * dt;
@@ -356,6 +395,9 @@ void Map_Layer_Set_Route(const int16_t (*pts)[2], uint8_t count)
   for (uint8_t i = 0; i < count; i++) { in[i][0] = pts[i][0]; in[i][1] = pts[i][1]; }
   float r = ROUTE_BEND_PX / fmaxf(zoom_target > 0 ? zoom_target : 1, 0.3f);
   route_count = count >= 2 ? Round_Route(in, count, r, route) : 0;
+  if (route_count) route_along[0] = 0;
+  for (uint16_t i = 1; i < route_count; i++)
+    route_along[i] = route_along[i - 1] + hypotf(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]);
   if (layer) lv_obj_invalidate(layer);
 }
 
@@ -457,6 +499,33 @@ struct Raster {
 // `half` (a casing; pass core = half for a plain line), blending by coverage x fade
 static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color);
 
+// Casing coverage for the strip being drawn (LVGL draws the band in strips of up to MASK_ROWS rows)
+#define MASK_ROWS 20
+static uint8_t casing_mask[480 * MASK_ROWS];
+
+static void Clear_Casing_Mask(const Raster &r)
+{
+  memset(casing_mask, 0, sizeof(casing_mask));
+}
+
+// Darkens the picture under the recorded casing, once per pixel
+static void Apply_Casing_Mask(const Raster &r)
+{
+  for (int y = r.clip.y1; y <= r.clip.y2; y++) {
+    lv_color_t *row = r.buf + (y - r.buf_area.y1) * r.buf_w - r.buf_area.x1;
+    const uint8_t *m = &casing_mask[(y - r.buf_area.y1) * r.buf_w - r.buf_area.x1];
+    for (int x = r.clip.x1; x <= r.clip.x2; x++) {
+      if (!m[x]) continue;
+      uint32_t keep = 255 - m[x];
+      lv_color_t c = row[x];
+      c.ch.red = (c.ch.red * keep) >> 8;
+      c.ch.green = (c.ch.green * keep) >> 8;
+      c.ch.blue = (c.ch.blue * keep) >> 8;
+      row[x] = c;
+    }
+  }
+}
+
 static void Capsule(const Raster &r, Pt a, Pt b, float half, lv_color_t color)
 {
   Capsule2(r, a, b, half, color, half, color);
@@ -537,24 +606,26 @@ IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color
         cover = (cover * (256 - f)) >> 8;
       }
       if (cover <= 4) continue;
-      // Pieces of a line overlap at every joint: plain blending would add their soft edges
-      // twice (bright rings). Light lines keep the brighter of old and new, the black casing
-      // keeps the darker, so overlapping pieces merge into one line.
-      lv_color_t old = row[x];
+      // Pieces of a line overlap at every joint, so a pixel can be drawn several times. Each
+      // write must give the same result however often it is repeated:
+      //  - black casing: record the strongest coverage in a mask; it darkens the picture once,
+      //    after all casing pieces (Apply_Casing_Mask)
+      //  - light lines: the line's colour scaled by coverage (as if over black), keeping the
+      //    brighter of that and what is there (max is the same however often it's applied)
       if (darken) {
-        uint32_t keep = 255 - cover;
-        lv_color_t dim;
-        dim.ch.red = (old.ch.red * keep) >> 8;
-        dim.ch.green = (old.ch.green * keep) >> 8;
-        dim.ch.blue = (old.ch.blue * keep) >> 8;
-        row[x] = dim;
-      } else {
-        lv_color_t mixed = cover >= 250 ? col : lv_color_mix(col, old, (lv_opa_t)cover);
-        if (mixed.ch.red < old.ch.red) mixed.ch.red = old.ch.red;
-        if (mixed.ch.green < old.ch.green) mixed.ch.green = old.ch.green;
-        if (mixed.ch.blue < old.ch.blue) mixed.ch.blue = old.ch.blue;
-        row[x] = mixed;
+        uint8_t *m = &casing_mask[(y - r.buf_area.y1) * r.buf_w + (x - r.buf_area.x1)];
+        if (cover > *m) *m = (uint8_t)LV_MIN(cover, 255u);
+        continue;
       }
+      lv_color_t old = row[x], lit;
+      lit.ch.red = (col.ch.red * cover) >> 8;
+      lit.ch.green = (col.ch.green * cover) >> 8;
+      lit.ch.blue = (col.ch.blue * cover) >> 8;
+      if (cover >= 250) lit = col;
+      if (lit.ch.red < old.ch.red) lit.ch.red = old.ch.red;
+      if (lit.ch.green < old.ch.green) lit.ch.green = old.ch.green;
+      if (lit.ch.blue < old.ch.blue) lit.ch.blue = old.ch.blue;
+      row[x] = lit;
     }
   }
 }
@@ -599,12 +670,17 @@ static void Draw_Route(const Raster &r)
   Pt split_pt = To_Screen(&r.box, ox + route[split][0], oy + route[split][1]);
   const float (*rest)[2] = route + split + 1;
   uint16_t rest_n = route_count - split - 1;
+  // The strip being drawn must fit the casing mask; LVGL draws in strips of at most MASK_ROWS
+  bool fits = r.buf_w <= 480 && lv_area_get_height(&r.buf_area) <= MASK_ROWS;
   for (int pass = 0; pass < 2; pass++) {
     float extra = pass == 0 ? ROUTE_CASING : 0;
     lv_color_t back = pass == 0 ? black : done, front = pass == 0 ? black : bright;
+    if (pass == 0 && !fits) continue;
+    if (pass == 0) Clear_Casing_Mask(r);
     Polyline(r, route, split + 1, ox, oy, NULL, behind + extra, back, behind + extra, back);
     Capsule2(r, split_pt, here, behind + extra, back, behind + extra, back);
     Polyline(r, rest, rest_n, ox, oy, &here, ahead + extra, front, ahead + extra, front);
+    if (pass == 0) Apply_Casing_Mask(r);
   }
 }
 
