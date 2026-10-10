@@ -12,6 +12,7 @@
 #include "Pages.h"
 #include "Clock.h"
 #include "Map_Layer.h"
+#include "Settings.h"
 #include "BLE_Link.h"
 #include <mbedtls/base64.h>
 #include <esp_heap_caps.h>
@@ -20,6 +21,7 @@ LV_FONT_DECLARE(font_title_44);
 LV_FONT_DECLARE(font_text_32);
 LV_FONT_DECLARE(font_small_26);
 LV_FONT_DECLARE(font_media_40);
+LV_FONT_DECLARE(font_media_22);
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
@@ -30,6 +32,7 @@ LV_FONT_DECLARE(font_media_40);
 #define ICON_PLAY       "\xEE\x80\xB7"      // U+E037
 #define ICON_NEXT       "\xEE\x81\x84"      // U+E044
 #define ICON_PREVIOUS   "\xEE\x81\x85"      // U+E045
+#define ICON_NOTE       "\xEE\x90\x85"      // U+E405
 
 static lv_obj_t *call_root, *call_name;
 static lv_obj_t *music_root, *music_top, *music_title, *music_artist, *music_none;
@@ -382,18 +385,58 @@ void Music_Screen_Show(bool show)
 }
 
 /************************************ Updates ************************************/
+// While music plays: a small note at the bottom of the other pages; tap it for Now playing
+static lv_obj_t *note_btn;
+
+static void Note_Click(lv_event_t *e)
+{
+  Pages_Show(3);
+}
+
+static void Note_Create(void)
+{
+  note_btn = lv_btn_create(lv_layer_top());     // created before the call overlay, so it sits under it
+  lv_obj_remove_style_all(note_btn);
+  lv_obj_set_size(note_btn, 32, 32);
+  lv_obj_set_style_radius(note_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(note_btn, COLOR_BLUE, 0);
+  lv_obj_set_style_bg_opa(note_btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(note_btn, lv_color_hex(0x2C5CC0), LV_STATE_PRESSED);
+  lv_obj_set_ext_click_area(note_btn, 16);       // easier to hit with gloves
+  lv_obj_align(note_btn, LV_ALIGN_TOP_MID, 0, 442);
+  lv_obj_t *icon = lv_label_create(note_btn);
+  lv_obj_set_style_text_font(icon, &font_media_22, 0);
+  lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+  lv_label_set_text(icon, ICON_NOTE);
+  lv_obj_center(icon);
+  lv_obj_add_event_cb(note_btn, Note_Click, LV_EVENT_CLICKED, NULL);
+  lv_obj_add_flag(note_btn, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void Note_Update(const Phone_State &s)
+{
+  bool show = s.media_playing && s.title[0] && Pages_Current() != 3 && !Settings_Panel_Open() && !s.call_ringing;
+  if (show == lv_obj_has_flag(note_btn, LV_OBJ_FLAG_HIDDEN)) Show_If(note_btn, show);
+}
+
 static void Tick(lv_timer_t *timer)
 {
   Phone_State s;
   Phone_Notify_Get(&s);
 
-  bool ringing = s.call_ringing;
+  // The phone says it's ringing first and gives the caller's name a moment later: wait for the
+  // name (up to 1.5 s) rather than flash "Unknown caller"
+  static uint32_t ring_ms = 0;
+  if (!s.call_ringing) ring_ms = 0;
+  else if (!ring_ms) ring_ms = millis() | 1;
+  bool ringing = s.call_ringing && (s.caller[0] || millis() - ring_ms > 1500);
   if (ringing != Call_Screen_Showing()) {
     Show_If(call_root, ringing);
     // The map underneath stops redrawing while the call covers it
     Map_Layer_Set_Visible(Pages_Nav_Visible());
   }
   if (ringing) Set_Text(call_name, s.caller[0] ? s.caller : "Unknown caller");
+  Note_Update(s);
 
   // Album art: ask for it when the song changes (again after 15 s if nothing came), draw it when complete
   static char last_song[112] = "";
@@ -432,6 +475,7 @@ static void Tick(lv_timer_t *timer)
 void Phone_Screens_Create(lv_obj_t *parent)
 {
   Music_Create(parent);
+  Note_Create();
   Call_Create();
   lv_timer_create(Tick, 200, NULL);
 }
