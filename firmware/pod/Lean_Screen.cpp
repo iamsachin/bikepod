@@ -32,11 +32,14 @@ LV_FONT_DECLARE(font_big_104);
 LV_FONT_DECLARE(font_title_44);
 LV_FONT_DECLARE(font_text_32);
 LV_FONT_DECLARE(font_small_26);
+LV_FONT_DECLARE(font_refresh_28);
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_DASH      lv_color_hex(0x2E2E2E)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
 #define COLOR_DIM       lv_color_hex(0x6A6A6A)
+#define COLOR_GREEN     lv_color_hex(0x34C759)
+#define ICON_REFRESH    "\xEE\x97\x95"     // U+E5D5, Material Icons Round
 #define DEGREE          "\xC2\xB0"
 #define MIDDLE_DOT      "\xC2\xB7"
 
@@ -107,7 +110,8 @@ static lv_obj_t *value_label, *side_label;
 static lv_obj_t *max_l_label, *lat_label, *max_r_label;
 static lv_obj_t *graph;
 static lv_point_t graph_pts[HISTORY];
-static lv_obj_t *cal_label;
+static lv_obj_t *cal_label, *cal_icon;
+static uint32_t cal_refused_ms = 0;
 static bool visible = false;
 
 /********************************* Sensor *********************************/
@@ -270,6 +274,22 @@ void Motion_Get(Motion *out)
   }
 }
 
+bool Lean_Is_Calibrated(void)
+{
+  return calibrated;
+}
+
+static uint32_t user_cal_ms = 0;   // when the rider last asked to calibrate (lean page shows it)
+
+bool Lean_Request_Calibration(void)
+{
+  float v = lv_tick_elaps(speed_at_ms) < 3000 ? speed_mps : 0;
+  if (v > 2.0f) return false;
+  Lean_Calibrate();
+  user_cal_ms = lv_tick_get();
+  return true;
+}
+
 void Lean_Calibrate(void)
 {
   measure_up = true;                  // the rider asked: the bike is upright now
@@ -399,11 +419,24 @@ static void Refresh(lv_timer_t *timer)
   lv_line_set_points(graph, graph_pts, HISTORY);
   }
 
-  if (calibrated) {
+  // Calibration line: green for 2 s after a calibration the rider asked for has finished
+  static bool was_calibrated = true;
+  static uint32_t done_ms = 0;
+  if (calibrated && !was_calibrated && user_cal_ms) done_ms = lv_tick_get();
+  was_calibrated = calibrated;
+  bool just_done = done_ms && lv_tick_elaps(done_ms) < 2000;
+  lv_color_t colour = just_done ? COLOR_GREEN : COLOR_DIM;
+  if (cal_refused_ms && lv_tick_elaps(cal_refused_ms) < 2000) {
+    Set_Text(cal_label, "Stop to calibrate");
+  } else if (calibrated) {
     snprintf(text, sizeof(text), "Calibrated " MIDDLE_DOT " tilt %d" DEGREE, (int)lroundf(tilt_deg));
     Set_Text(cal_label, text);
   } else {
     Set_Text(cal_label, "Calibrating, keep still");
+  }
+  if (lv_obj_get_style_text_color(cal_label, 0).full != colour.full) {
+    lv_obj_set_style_text_color(cal_label, colour, 0);
+    lv_obj_set_style_text_color(cal_icon, colour, 0);
   }
 }
 
@@ -435,6 +468,11 @@ static lv_obj_t *Stat(lv_obj_t *row, const char *caption, lv_color_t value_color
   lv_obj_t *cap = Label(col, &font_small_26, COLOR_DIM);
   lv_label_set_text(cap, caption);
   return value;
+}
+
+static void Cal_Tapped(lv_event_t *e)
+{
+  if (!Lean_Request_Calibration()) cal_refused_ms = lv_tick_get();
 }
 
 void Lean_Screen_Create(lv_obj_t *parent)
@@ -502,8 +540,18 @@ void Lean_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_line_width(graph, 3, 0);
   lv_obj_set_style_line_rounded(graph, true, 0);
 
-  cal_label = Label(root, &font_small_26, COLOR_DIM);
-  lv_obj_align(cal_label, LV_ALIGN_TOP_MID, 0, 392);
+  // "Calibrated · tilt 7°" with a refresh icon: tap either to calibrate again
+  lv_obj_t *cal_row = Box(root, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(cal_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(cal_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(cal_row, 8, 0);
+  lv_obj_align(cal_row, LV_ALIGN_TOP_MID, 0, 390);
+  lv_obj_add_flag(cal_row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(cal_row, 16);
+  lv_obj_add_event_cb(cal_row, Cal_Tapped, LV_EVENT_CLICKED, NULL);
+  cal_label = Label(cal_row, &font_small_26, COLOR_DIM);
+  cal_icon = Label(cal_row, &font_refresh_28, COLOR_DIM);
+  lv_label_set_text(cal_icon, ICON_REFRESH);
 
   Pages_Add_Dots(root, PAGE_LEAN);
 

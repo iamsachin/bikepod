@@ -19,6 +19,7 @@ LV_FONT_DECLARE(font_small_26);
 #define COLOR_PILL      lv_color_hex(0x262626)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
 #define COLOR_DIM       lv_color_hex(0x6A6A6A)
+#define COLOR_GREEN     lv_color_hex(0x2FA352)
 
 static const uint8_t BRIGHTNESS[4] = { 25, 50, 75, 100 };
 static const char *BRIGHTNESS_NAME[4] = { "Low", "Mid", "High", "Max" };
@@ -118,17 +119,45 @@ static void Bright_Cb(lv_event_t *e)
   Refresh_Choices();
 }
 
-static void Cal_Done(lv_timer_t *timer)
+// Calibrate button: "Keep still..." while measuring, then green "Calibrated" for 2 s, so it's
+// clear it worked ("Stop to calibrate" if the bike is moving)
+static lv_timer_t *cal_timer;
+static uint32_t cal_state_ms;
+static enum { CAL_IDLE, CAL_MEASURING, CAL_DONE, CAL_REFUSED } cal_state = CAL_IDLE;
+
+static void Cal_Show(const char *text, lv_color_t bg)
 {
-  lv_label_set_text(cal_label, "Calibrate lean");
+  lv_label_set_text(cal_label, text);
+  lv_obj_set_style_bg_color(lv_obj_get_parent(cal_label), bg, 0);
+}
+
+static void Cal_Tick(lv_timer_t *timer)
+{
+  if (cal_state == CAL_MEASURING && Lean_Is_Calibrated()) {
+    cal_state = CAL_DONE;
+    cal_state_ms = lv_tick_get();
+    Cal_Show("Calibrated", COLOR_GREEN);
+  } else if ((cal_state == CAL_DONE || cal_state == CAL_REFUSED) && lv_tick_elaps(cal_state_ms) > 2000) {
+    cal_state = CAL_IDLE;
+    Cal_Show("Calibrate lean", COLOR_PILL);
+    lv_timer_del(cal_timer);
+    cal_timer = NULL;
+  }
 }
 
 static void Cal_Cb(lv_event_t *e)
 {
-  Lean_Calibrate();                   // takes about a second: the pod must be still and upright
-  lv_label_set_text(cal_label, "Keep still...");
-  lv_timer_t *t = lv_timer_create(Cal_Done, 1500, NULL);
-  lv_timer_set_repeat_count(t, 1);
+  if (cal_state == CAL_MEASURING) return;
+  // Takes about a second: the pod must be still and upright
+  if (Lean_Request_Calibration()) {
+    cal_state = CAL_MEASURING;
+    Cal_Show("Keep still...", COLOR_PILL);
+  } else {
+    cal_state = CAL_REFUSED;
+    Cal_Show("Stop to calibrate", COLOR_PILL);
+  }
+  cal_state_ms = lv_tick_get();
+  if (!cal_timer) cal_timer = lv_timer_create(Cal_Tick, 100, NULL);
 }
 
 void Settings_Panel_Create(lv_obj_t *parent)
@@ -140,23 +169,23 @@ void Settings_Panel_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
   lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
 
-  Caption(panel, "SETTINGS", 62, COLOR_GREY);
+  Caption(panel, "SETTINGS", 50, COLOR_GREY);
 
-  Caption(panel, "Clock", 112, COLOR_DIM);
-  lv_obj_t *row = Row(panel, 146, 290);
+  Caption(panel, "Clock", 100, COLOR_DIM);
+  lv_obj_t *row = Row(panel, 134, 290);
   clock_btn[0] = Pill(row, 140, "12 h", Clock_Cb, 0);
   clock_btn[1] = Pill(row, 140, "24 h", Clock_Cb, 1);
 
-  Caption(panel, "Brightness", 222, COLOR_DIM);
-  row = Row(panel, 256, 400);
+  Caption(panel, "Brightness", 210, COLOR_DIM);
+  row = Row(panel, 244, 400);
   for (int i = 0; i < 4; i++) bright_btn[i] = Pill(row, 94, BRIGHTNESS_NAME[i], Bright_Cb, i);
 
-  row = Row(panel, 340, 290);
+  row = Row(panel, 328, 290);
   lv_obj_t *cal = Pill(row, 290, "", Cal_Cb, 0);
   cal_label = lv_obj_get_child(cal, 0);
   lv_label_set_text(cal_label, "Calibrate lean");
 
-  Caption(panel, "Swipe up to close", 418, COLOR_DIM);
+  Caption(panel, "Swipe up to close", 406, COLOR_DIM);
 
   Refresh_Choices();
   lv_obj_set_y(panel, -LV_VER_RES);

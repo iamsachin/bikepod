@@ -84,7 +84,7 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
       else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
-      else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
+      else if (strcmp(cmd, "cal") == 0) Lean_Request_Calibration();
       else if (strncmp(cmd, "gfake", 5) == 0) {
         float lat = 0, lon = 0;
         bool on = sscanf(cmd + 5, "%f %f", &lat, &lon) == 2;

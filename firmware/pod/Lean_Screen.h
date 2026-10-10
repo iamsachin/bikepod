@@ -13,6 +13,10 @@ void Lean_Screen_Show(bool show);
 void Lean_Set_Speed(float metres_per_second);
 // Re-measures and saves which way is up (pod still, bike upright) and clears the maximums
 void Lean_Calibrate(void);
+// The rider asked (settings button, lean page): calibrates unless the bike is moving (a lean
+// measured on the move would be saved as upright). Returns false if refused.
+bool Lean_Request_Calibration(void);
+bool Lean_Is_Calibrated(void);
 
 /* Motion, for the acceleration page: g felt along and across the bike. Estimates, not
    measurements: lateral is speed x turn rate (0 when stopped), longitudinal the accelerometer
