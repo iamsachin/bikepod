@@ -105,8 +105,8 @@ static void Tick(lv_timer_t *timer)
   static int sent = -1;
   static uint32_t sent_ms = 0;
   if (BLE_Link_Connected() && (percent != sent || millis() - sent_ms > 30000) && millis() - sent_ms > 5000) {
-    char line[16];
-    snprintf(line, sizeof(line), "BATTERY|%d", percent);
+    char line[24];
+    snprintf(line, sizeof(line), "BATTERY|%d|%.3f", percent, Battery_Volts());   // volts: for calibrating
     BLE_Link_Notify(line);
     sent = percent;
     sent_ms = millis();

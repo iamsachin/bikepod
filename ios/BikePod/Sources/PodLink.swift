@@ -196,8 +196,10 @@ extension PodLink: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
               let line = String(data: data, encoding: .utf8) else { return }
-        if line.hasPrefix("BATTERY|") {
-            podBattery = Int(line.dropFirst("BATTERY|".count))
+        if line.hasPrefix("BATTERY|") {                       // BATTERY|78|3.912 (percent, volts)
+            let fields = line.split(separator: "|")
+            if fields.count >= 2 { podBattery = Int(fields[1]) }
+            DebugLog.write("POD battery \(fields.dropFirst().joined(separator: " % "))V")   // for calibrating the curve
             return
         }
         if !line.hasPrefix("LEAN|") { DebugLog.write("LINK event \(line.prefix(80))") }   // LEAN: every 2 s

@@ -30,6 +30,7 @@
 // Pod -> phone: notifications the app subscribes to, one UTF-8 line each:
 //   NOWPLAYING|7|Tum Hi Ho|Arijit Singh   the song changed (id 7): the app looks up its cover
 //   LEAN|31|27                 deepest lean left / right (degrees) in the last 2 s, while moving
+//   BATTERY|78|3.912           charge left (%) and the averaged battery voltage
 // Phone -> pod, in reply (on the Nav characteristic):
 //   ART|7|0|80|<base64>       part 0 of 80 of song 7's cover: 120x120 RGB565, 360 bytes a part
 #define POD_EVENT_CHAR_UUID   "6e0a3a5c-6f2b-4c1d-9c9a-2b6c5d7e8f10"
