@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		11C7FA4B115A56CAE38983C7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 18C967811A9A21CAD1C811A8 /* Assets.xcassets */; };
 		1A6A4EE15443E9A14DE7067D /* MapLibreSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B6B1006D993BC2E018E2A9E3 /* MapLibreSwiftUI */; };
 		209543603BFE68B8710630C5 /* RouteLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B34CF55DF8CE23B787F5A8C /* RouteLayer.swift */; };
 		241ABC5802481155CF537CBE /* PodTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54648A52B85CD664DD5BF890 /* PodTestView.swift */; };
@@ -32,6 +33,7 @@
 /* Begin PBXFileReference section */
 		12AEF1DF513E62CCF2377CA4 /* FreshLocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreshLocationProvider.swift; sourceTree = "<group>"; };
 		17D47BD68CE41B64E0D79683 /* MapFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapFeed.swift; sourceTree = "<group>"; };
+		18C967811A9A21CAD1C811A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		221E8EB08715D6EDAC24B568 /* PodLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodLink.swift; sourceTree = "<group>"; };
 		3314AE08E78E36AB0935AEF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		44C76E28EF65BA10A60CC07C /* MapArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapArea.swift; sourceTree = "<group>"; };
@@ -97,6 +99,7 @@
 		ADA92A7C354D9F2EBAED179C /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				18C967811A9A21CAD1C811A8 /* Assets.xcassets */,
 				3314AE08E78E36AB0935AEF8 /* Info.plist */,
 			);
 			path = Resources;
@@ -119,6 +122,7 @@
 			buildConfigurationList = 532F9545ED4A232550F427D4 /* Build configuration list for PBXNativeTarget "BikePod" */;
 			buildPhases = (
 				65FCC14B0E92CE09D98A2E53 /* Sources */,
+				5D85912C120DFCF9C1FCFA63 /* Resources */,
 				A7FA4BD1270100D0162FAA7C /* Frameworks */,
 			);
 			buildRules = (
@@ -176,6 +180,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5D85912C120DFCF9C1FCFA63 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11C7FA4B115A56CAE38983C7 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		65FCC14B0E92CE09D98A2E53 /* Sources */ = {
