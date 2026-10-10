@@ -19,6 +19,10 @@ struct ContentView: View {
     private static let darkStyle = URL(string: "https://tiles.openfreemap.org/styles/dark")!
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    /// Bumped when the app comes back after a while: the map is rebuilt in place (see below)
+    @State private var mapGeneration = 0
+    @State private var backgroundedAt: Date?
     @State private var search = PlaceSearch()
     @State private var recents = RecentPlaces()
     @State private var saved = SavedPlaces()
@@ -56,7 +60,21 @@ struct ContentView: View {
                            identifier: "route", color: .systemBlue, casingColor: .white, below: routeAnchor)
             }
         }
-        .id(mapStyle)                                   // a new style needs a fresh map
+        // A new style needs a fresh map. So does coming back to the app: the map's follow camera
+        // otherwise flew from where it was when the app left to where you are now (seconds of
+        // blank, spinning map); a fresh map starts at your position without animating
+        .id("\(mapStyle)#\(mapGeneration)")
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                backgroundedAt = Date()
+            case .active:
+                if let since = backgroundedAt, Date().timeIntervalSince(since) > 2 { mapGeneration += 1 }
+                backgroundedAt = nil
+            default:
+                break
+            }
+        }
         .overlay(alignment: .top) {
             if !isNavigating { topPanel.padding(.horizontal) }
         }
