@@ -41,8 +41,13 @@ final class Navigator {
     /// Stops the automatic pod updates, e.g. while the manual "Pod test" sheet is open
     @ObservationIgnored var podFeedPaused = false
     /// Replay routes with fake GPS instead of following the phone (set in the Pod & testing sheet).
-    /// Off at every launch, so a real ride never starts as a simulation by mistake.
+    /// On at launch in development (Debug) builds, as asked while the app is being built; off in
+    /// release builds, so a real ride never starts as a simulation by mistake.
+    #if DEBUG
+    var simulateRides = true
+    #else
     var simulateRides = false
+    #endif
     var simulationSpeed: UInt64 = 4
     /// The finished trip, for the Arrived card
     private(set) var lastTrip: (km: Double, seconds: TimeInterval)?
