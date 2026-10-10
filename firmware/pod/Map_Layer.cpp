@@ -15,7 +15,8 @@
   instead of unwinding (that unwinding made the map rotate, slip back, rotate... through turns).
 ******************************************************************************/
 // This file's drawing loops run for every map pixel: compile it for speed, not size (Arduino's -Os)
-#pragma GCC optimize("O2")
+// (no-math-errno lets sqrtf use the FPU's own instructions instead of calling into flash)
+#pragma GCC optimize("O2", "no-math-errno")
 #include "Map_Layer.h"
 #include <Arduino.h>
 #include <math.h>
@@ -33,7 +34,7 @@
 #define PREDICT_SPEED   0.95f     // predict a little slower than measured (riders slow into turns)
 #define HOLD_BACK_DEG   8.0f      // in a turn, smaller corrections against it wait instead
 
-struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; int16_t cx, cy, radius; };
+struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; };
 
 struct Map_Area {
   uint16_t id;
@@ -170,15 +171,6 @@ void Map_Data_Add_Road(uint16_t area_id, uint8_t road_class, const int16_t (*pts
     r.start = a->point_count;
     r.count = count;
     r.road_class = road_class;
-    // Bounding circle, so roads off screen can be skipped without looking at their points
-    int16_t lx = pts[0][0], hx = pts[0][0], ly = pts[0][1], hy = pts[0][1];
-    for (uint8_t i = 1; i < count; i++) {
-      lx = LV_MIN(lx, pts[i][0]); hx = LV_MAX(hx, pts[i][0]);
-      ly = LV_MIN(ly, pts[i][1]); hy = LV_MAX(hy, pts[i][1]);
-    }
-    r.cx = (lx + hx) / 2;
-    r.cy = (ly + hy) / 2;
-    r.radius = (int16_t)(sqrtf((float)(hx - lx) * (hx - lx) + (float)(hy - ly) * (hy - ly)) / 2 + 1);
     memcpy(a->points[a->point_count], pts, count * sizeof(a->points[0]));
     a->point_count += count;
   } else if (a) {
@@ -490,6 +482,7 @@ static float cam_sin, cam_cos;
 bool fade_on = false;                   // (also switched by the serial "hide fade" test command)
 static uint8_t row_fade[FADE_MAX_ROWS];     // top/bottom fade per band row
 static int16_t clear_half[FADE_MAX_ROWS];   // half-width of the unfaded middle of each row (-1: none)
+static int16_t vis_half[FADE_MAX_ROWS];     // half-width of the part of each row not faded to black
 static uint8_t rim_lut[RIM_LUT_SIZE];
 static lv_coord_t fade_box_y1 = -1, fade_box_h = 0;
 static float fade_top, fade_bottom, fade_r0, fade_r1;
@@ -521,16 +514,17 @@ static void Fill_Row_Tables(const lv_area_t *box)
     row_fade[i] = (uint8_t)(LV_MAX(top, bottom) * 255);
     float dy = box->y1 + i + 0.5f - screen_cy;
     clear_half[i] = fade_r0 * fade_r0 > dy * dy ? (int16_t)sqrtf(fade_r0 * fade_r0 - dy * dy) : -1;
+    vis_half[i] = fade_r1 * fade_r1 > dy * dy ? (int16_t)sqrtf(fade_r1 * fade_r1 - dy * dy) + 1 : -1;
   }
 }
 
-struct Fade_Row { uint32_t row; int clear_half; int dy2; };
+struct Fade_Row { uint32_t row; int clear_half; int dy2; int vis_half; };
 
 static inline Fade_Row Row_Fade(int y)
 {
   int i = LV_CLAMP(0, y - fade_box_y1, fade_box_h - 1);
   int dy = y - screen_cy;
-  return { row_fade[i], clear_half[i], dy * dy };
+  return { row_fade[i], clear_half[i], dy * dy, vis_half[i] };
 }
 
 static inline uint32_t Pixel_Fade(const Fade_Row &f, int x)
@@ -566,22 +560,22 @@ static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, 
 
 // Casing coverage for the strip being drawn (LVGL draws the band in strips of up to MASK_ROWS rows)
 #define MASK_ROWS 20
-static uint8_t casing_mask[480 * MASK_ROWS];
+static uint8_t casing_mask[480 * MASK_ROWS];     // always all zero outside a casing pass
+static int mask_x1 = INT16_MAX, mask_x2 = INT16_MIN, mask_y1 = INT16_MAX, mask_y2 = INT16_MIN;   // touched (screen)
 
-static void Clear_Casing_Mask(const Raster &r)
-{
-  memset(casing_mask, 0, sizeof(casing_mask));
-}
-
-// Darkens the picture under the recorded casing, once per pixel
+// Darkens the picture under the recorded casing, once per pixel, and clears what it used (only
+// the part the casing touched: going over the whole strip cost ~4 ms a frame)
 static void Apply_Casing_Mask(const Raster &r)
 {
-  for (int y = r.clip.y1; y <= r.clip.y2; y++) {
+  int x1 = LV_MAX(mask_x1, r.clip.x1), x2 = LV_MIN(mask_x2, r.clip.x2);
+  int y1 = LV_MAX(mask_y1, r.clip.y1), y2 = LV_MIN(mask_y2, r.clip.y2);
+  for (int y = y1; y <= y2 && x1 <= x2; y++) {
     lv_color_t *row = r.buf + (y - r.buf_area.y1) * r.buf_w - r.buf_area.x1;
-    const uint8_t *m = &casing_mask[(y - r.buf_area.y1) * r.buf_w - r.buf_area.x1];
-    for (int x = r.clip.x1; x <= r.clip.x2; x++) {
+    uint8_t *m = &casing_mask[(y - r.buf_area.y1) * r.buf_w - r.buf_area.x1];
+    for (int x = x1; x <= x2; x++) {
       if (!m[x]) continue;
       uint32_t keep = 255 - m[x];
+      m[x] = 0;
       lv_color_t c = row[x];
       c.ch.red = (c.ch.red * keep) >> 8;
       c.ch.green = (c.ch.green * keep) >> 8;
@@ -589,6 +583,8 @@ static void Apply_Casing_Mask(const Raster &r)
       row[x] = c;
     }
   }
+  mask_x1 = mask_y1 = INT16_MAX;
+  mask_x2 = mask_y2 = INT16_MIN;
 }
 
 static void Capsule(const Raster &r, Pt a, Pt b, float half, lv_color_t color)
@@ -598,79 +594,180 @@ static void Capsule(const Raster &r, Pt a, Pt b, float half, lv_color_t color)
 
 uint32_t map_perf_capsules = 0, map_perf_pixels = 0;
 
+// Small helpers kept inline: the library floorf/ceilf/fminf/fmaxf live in flash, and calling
+// them from this loop (several per row) stalled on the cache shared with PSRAM
+static inline int Floor_I(float v) { int i = (int)v; return i - (v < i); }
+static inline int Ceil_I(float v) { int i = (int)v; return i + (v > i); }
+static inline float Min_F(float a, float b) { return a < b ? a : b; }
+static inline float Max_F(float a, float b) { return a > b ? a : b; }
+// Square root without the library call: bit-trick estimate + two Newton steps (~1e-6 relative)
+static inline float Sqrt_F(float v)
+{
+  if (v <= 0) return 0;
+  union { float f; uint32_t i; } u = { v };
+  u.i = (u.i >> 1) + 0x1FC00000;
+  float s = u.f;
+  s = 0.5f * (s + v / s);
+  return 0.5f * (s + v / s);
+}
+
+// Colour scaled by coverage (as if over black)
+static inline lv_color_t Scale(lv_color_t c, uint32_t cover)
+{
+  lv_color_t s;
+  s.ch.red = (c.ch.red * cover) >> 8;
+  s.ch.green = (c.ch.green * cover) >> 8;
+  s.ch.blue = (c.ch.blue * cover) >> 8;
+  return s;
+}
+
+// The brighter of two colours, channel by channel
+static inline lv_color_t Lighten(lv_color_t old, lv_color_t lit)
+{
+  if (lit.ch.red < old.ch.red) lit.ch.red = old.ch.red;
+  if (lit.ch.green < old.ch.green) lit.ch.green = old.ch.green;
+  if (lit.ch.blue < old.ch.blue) lit.ch.blue = old.ch.blue;
+  return lit;
+}
+
+// Narrows [k1, k2] to the k where lo <= start + step * k <= hi, one step inside the exact bounds
+static inline void Solid_Range(int32_t start, int32_t step, float inv_step, int32_t lo, int32_t hi, int *k1, int *k2)
+{
+  if (step == 0) {
+    if (start < lo || start > hi) *k2 = *k1 - 1;
+    return;
+  }
+  float ka = (lo - start) * inv_step, kb = (hi - start) * inv_step;
+  if (ka > kb) { float s = ka; ka = kb; kb = s; }
+  *k1 = LV_MAX(*k1, Ceil_I(ka) + 1);
+  *k2 = LV_MIN(*k2, Floor_I(kb) - 1);
+}
+
 // In IRAM: running from flash, the loop's code kept being evicted from the cache it shares with PSRAM
+// One copy of the loop per kind of line (casing blend or not, darkening mask or lightening, edge
+// fade or not): with every case in one loop it ran out of registers and spilled to memory
+template <bool CASING, bool DARKEN, bool FADE>
+IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color);
+
 IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color)
 {
   map_perf_capsules++;
-  const float reach = half + 0.6f;                  // how far from the line a pixel centre can be touched
-  float minx = fminf(a.x, b.x) - reach, maxx = fmaxf(a.x, b.x) + reach;
-  float miny = fminf(a.y, b.y) - reach, maxy = fmaxf(a.y, b.y) + reach;
-  int x1 = LV_MAX((int)floorf(minx), r.clip.x1), x2 = LV_MIN((int)ceilf(maxx), r.clip.x2);
-  int y1 = LV_MAX((int)floorf(miny), r.clip.y1), y2 = LV_MIN((int)ceilf(maxy), r.clip.y2);
-  if (x1 > x2 || y1 > y2) return;
+  const bool casing = core < half, darken = color.full == 0;
+  if (fade_on) {
+    if (darken) Capsule_Kind<false, true, true>(r, a, b, half, color, core, edge_color);
+    else if (casing) Capsule_Kind<true, false, true>(r, a, b, half, color, core, edge_color);
+    else Capsule_Kind<false, false, true>(r, a, b, half, color, core, edge_color);
+  } else {
+    if (darken) Capsule_Kind<false, true, false>(r, a, b, half, color, core, edge_color);
+    else if (casing) Capsule_Kind<true, false, false>(r, a, b, half, color, core, edge_color);
+    else Capsule_Kind<false, false, false>(r, a, b, half, color, core, edge_color);
+  }
+}
 
-  float dx = b.x - a.x, dy = b.y - a.y, len = sqrtf(dx * dx + dy * dy);
+template <bool CASING, bool DARKEN, bool FADE>
+IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color)
+{
+  const float reach = half + 0.6f;                  // how far from the line a pixel centre can be touched
+  // Rows first: most segments don't touch the strip being drawn, so leave before anything else
+  int y1 = LV_MAX(Floor_I(Min_F(a.y, b.y) - reach), r.clip.y1), y2 = LV_MIN(Ceil_I(Max_F(a.y, b.y) + reach), r.clip.y2);
+  if (y1 > y2) return;
+  int x1 = LV_MAX(Floor_I(Min_F(a.x, b.x) - reach), r.clip.x1), x2 = LV_MIN(Ceil_I(Max_F(a.x, b.x) + reach), r.clip.x2);
+  if (x1 > x2) return;
+
+  float dx = b.x - a.x, dy = b.y - a.y, len = Sqrt_F(dx * dx + dy * dy);
   if (len < 1e-3f) { dx = 1e-3f; dy = 0; len = 1e-3f; }
-  float ux = dx / len, uy = dy / len;               // along the segment
+  const float inv_len = 1.0f / len;                 // divisions are slow (no FPU divide): one each
+  float ux = dx * inv_len, uy = dy * inv_len;       // along the segment
+  const bool sloped = dy > 1e-4f || dy < -1e-4f;
+  const float inv_dy = sloped ? 1.0f / dy : 0;
   const int32_t len_q = (int32_t)(len * 256);
   const int32_t in_q = (int32_t)(LV_MAX(half - 0.5f, 0.0f) * 256), out_q = (int32_t)((half + 0.5f) * 256);
-  const bool casing = core < half;
-  const bool darken = color.full == 0;              // black casing darkens; lines lighten
+  const bool casing = CASING;                       // line colour blends into a casing colour
+  const bool darken = DARKEN;                       // black casing darkens; lines lighten
   const int32_t core_lo_q = (int32_t)((core - 0.5f) * 256), core_hi_q = (int32_t)((core + 0.5f) * 256);
+  // Beyond the ends (round caps) the distance comes from distance squared: inside in_q or outside
+  // out_q needs no root, and across the 1 px edge between them a straight-line estimate is within
+  // 1/20 px (a square root per cap pixel was the loop's slowest part). Fits 32 bits: half <= ~40 px
+  const int32_t in2_q = in_q * in_q, out2_q = out_q * out_q;
+  const float edge_k = 1.0f / (in_q + out_q);
+  const bool fade = FADE;
+  const int32_t step_across = (int32_t)(-uy * 256), step_along = (int32_t)(ux * 256);
+  const float inv_step_across = step_across ? 1.0f / step_across : 0, inv_step_along = step_along ? 1.0f / step_along : 0;
+  // Solid: full coverage and (with a casing) still the line's own colour
+  const int32_t solid_q = casing ? LV_MIN(in_q, core_lo_q) : in_q;
 
-  for (int y = y1; y <= y2; y++) {
+  // Only the stretch of each row the capsule can touch (not the whole bounding box, which for a
+  // long diagonal is most of the screen): where the line crosses the band reach above and below
+  // the row's centre, kept to the segment's own x extent. Both move by `slope` per row.
+  const float seg_x_lo = Min_F(a.x, b.x), seg_x_hi = Max_F(a.x, b.x);
+  const float slope = sloped ? dx * inv_dy : 0;
+  float cross_a = a.x + (y1 + 0.5f - a.y - reach) * slope;   // line's x at (row centre - reach)
+  float cross_b = cross_a + 2 * reach * slope;                // ... and at (row centre + reach)
+  for (int y = y1; y <= y2; y++, cross_a += slope, cross_b += slope) {
     float py = y + 0.5f - a.y;
-    // Only the stretch of this row the capsule can touch (not the whole bounding box, which
-    // for a long diagonal is most of the screen)
-    float t0 = 0, t1 = 1;
-    if (fabsf(dy) > 1e-4f) {
-      t0 = (py - reach) / dy;
-      t1 = (py + reach) / dy;
-      if (t0 > t1) { float s = t0; t0 = t1; t1 = s; }
-      t0 = LV_MAX(t0, 0.0f);
-      t1 = LV_MIN(t1, 1.0f);
-      if (t0 > t1) continue;
-    } else if (fabsf(py) > reach) {
-      continue;
-    }
-    float sx0 = a.x + dx * t0, sx1 = a.x + dx * t1;
-    int rx1 = LV_MAX(x1, (int)floorf(fminf(sx0, sx1) - reach));
-    int rx2 = LV_MIN(x2, (int)ceilf(fmaxf(sx0, sx1) + reach));
+    if (!sloped && (py > reach || -py > reach)) continue;
+    float lo = sloped ? Max_F(Min_F(cross_a, cross_b), seg_x_lo) : seg_x_lo;
+    float hi = sloped ? Min_F(Max_F(cross_a, cross_b), seg_x_hi) : seg_x_hi;
+    if (lo > hi) continue;
+    int rx1 = LV_MAX(x1, Floor_I(lo - reach));
+    int rx2 = LV_MIN(x2, Ceil_I(hi + reach));
     if (rx1 > rx2) continue;
 
     lv_color_t *row = r.buf + (y - r.buf_area.y1) * r.buf_w - r.buf_area.x1;
-    Fade_Row fr;
-    if (fade_on) {
+    uint8_t *mask_row = &casing_mask[(y - r.buf_area.y1) * r.buf_w - r.buf_area.x1];
+    Fade_Row fr = { 0, 10000, 0, 10000 };
+    if (fade) {
       fr = Row_Fade(y);
-      if (fr.row >= 250) continue;                  // this whole row is faded to black
+      if (fr.row >= 250 || fr.vis_half < 0) continue;     // this whole row is faded to black
+      // Nothing to draw beyond the round screen's faded rim
+      rx1 = LV_MAX(rx1, screen_cx - fr.vis_half);
+      rx2 = LV_MIN(rx2, screen_cx + fr.vis_half);
+      if (rx1 > rx2) continue;
     }
     map_perf_pixels += rx2 - rx1 + 1;
+    if (DARKEN) {
+      mask_x1 = LV_MIN(mask_x1, rx1); mask_x2 = LV_MAX(mask_x2, rx2);
+      mask_y1 = LV_MIN(mask_y1, y); mask_y2 = LV_MAX(mask_y2, y);
+    }
     // Distance across the line and position along it, in 1/256 px, change by a constant per
     // pixel: integer adds only (floating point here cost ~70 cycles a pixel)
     float px = rx1 + 0.5f - a.x;
-    int32_t across = (int32_t)((px * -uy + py * ux) * 256), along = (int32_t)((px * ux + py * uy) * 256);
-    const int32_t step_across = (int32_t)(-uy * 256), step_along = (int32_t)(ux * 256);
-    for (int x = rx1; x <= rx2; x++, across += step_across, along += step_along) {
+    int32_t across0 = (int32_t)((px * -uy + py * ux) * 256), along0 = (int32_t)((px * ux + py * uy) * 256);
+
+    // The solid middle of the line (full coverage, line colour, the row's own fade) gets one
+    // colour, written by a tight loop; only the soft edges and caps need the per-pixel work.
+    // Kept one pixel inside the exact bounds, so rounding never puts an edge pixel in it.
+    int k1 = 0, k2 = rx2 - rx1;
+    if (k2 < 3 || solid_q < 256) {
+      k1 = k2 + 1;                                  // too short to have a middle
+    } else {
+      Solid_Range(across0, step_across, inv_step_across, -solid_q, solid_q, &k1, &k2);
+      Solid_Range(along0, step_along, inv_step_along, 0, len_q, &k1, &k2);
+    }
+
+    auto edge_pixel = [&](int x, int32_t across, int32_t along) __attribute__((always_inline)) {
       int32_t d;
       if (along >= 0 && along <= len_q) {
         d = across < 0 ? -across : across;          // beside the segment
       } else {
-        float ex = (along < 0 ? along : along - len_q) / 256.0f, ey = across / 256.0f;
-        d = (int32_t)(sqrtf(ex * ex + ey * ey) * 256);  // beyond an end: distance to that end
+        int32_t ex = along < 0 ? along : along - len_q;  // beyond an end: distance to that end
+        int32_t d2 = ex * ex + across * across;
+        if (d2 >= out2_q) return;
+        d = d2 <= in2_q ? 0 : (int32_t)((d2 - in2_q) * edge_k) + in_q;
       }
-      if (d >= out_q) continue;
+      if (d >= out_q) return;
       uint32_t cover = d <= in_q ? 255 : (uint32_t)((out_q - d) * 255) >> 8;
       lv_color_t col = color;
       if (casing && d > core_lo_q) {
         int32_t inside = core_hi_q - d;             // 1 px blend from line colour to casing
         col = inside <= 0 ? edge_color : lv_color_mix(color, edge_color, (lv_opa_t)((inside * 255) >> 8));
       }
-      if (fade_on) {
+      if (fade) {
         uint32_t f = Pixel_Fade(fr, x);
-        if (f >= 250) continue;
+        if (f >= 250) return;
         cover = (cover * (256 - f)) >> 8;
       }
-      if (cover <= 4) continue;
+      if (cover <= 4) return;
       // Pieces of a line overlap at every joint, so a pixel can be drawn several times. Each
       // write must give the same result however often it is repeated:
       //  - black casing: record the strongest coverage in a mask; it darkens the picture once,
@@ -678,20 +775,39 @@ IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color
       //  - light lines: the line's colour scaled by coverage (as if over black), keeping the
       //    brighter of that and what is there (max is the same however often it's applied)
       if (darken) {
-        uint8_t *m = &casing_mask[(y - r.buf_area.y1) * r.buf_w + (x - r.buf_area.x1)];
-        if (cover > *m) *m = (uint8_t)LV_MIN(cover, 255u);
-        continue;
+        if (cover > mask_row[x]) mask_row[x] = (uint8_t)LV_MIN(cover, 255u);
+        return;
       }
-      lv_color_t old = row[x], lit;
-      lit.ch.red = (col.ch.red * cover) >> 8;
-      lit.ch.green = (col.ch.green * cover) >> 8;
-      lit.ch.blue = (col.ch.blue * cover) >> 8;
-      if (cover >= 250) lit = col;
-      if (lit.ch.red < old.ch.red) lit.ch.red = old.ch.red;
-      if (lit.ch.green < old.ch.green) lit.ch.green = old.ch.green;
-      if (lit.ch.blue < old.ch.blue) lit.ch.blue = old.ch.blue;
-      row[x] = lit;
+      row[x] = Lighten(row[x], cover >= 250 ? col : Scale(col, cover));
+    };
+
+    int x = rx1;
+    int32_t across = across0, along = along0;
+    for (; x <= rx2 && x < rx1 + k1; x++, across += step_across, along += step_along) edge_pixel(x, across, along);
+    if (k1 <= k2) {
+      // Solid middle: full coverage, so only the edge fade varies (and only towards the rim)
+      int xe = rx1 + k2;
+      uint32_t last_f = 256;
+      uint32_t cover = 0;
+      lv_color_t lit = color;
+      for (; x <= xe; x++) {
+        uint32_t f = FADE ? Pixel_Fade(fr, x) : 0;
+        if (f != last_f) {
+          last_f = f;
+          cover = f >= 250 ? 0 : (255 * (256 - f)) >> 8;
+          lit = cover >= 250 ? color : Scale(color, cover);
+        }
+        if (cover <= 4) continue;
+        if (DARKEN) {
+          if (cover > mask_row[x]) mask_row[x] = (uint8_t)cover;
+        } else {
+          row[x] = row[x].full == 0 ? lit : Lighten(row[x], lit);
+        }
+      }
+      across = across0 + step_across * (x - rx1);
+      along = along0 + step_along * (x - rx1);
     }
+    for (; x <= rx2; x++, across += step_across, along += step_along) edge_pixel(x, across, along);
   }
 }
 
@@ -741,11 +857,38 @@ static void Draw_Route(const Raster &r)
     float extra = pass == 0 ? ROUTE_CASING : 0;
     lv_color_t back = pass == 0 ? black : done, front = pass == 0 ? black : bright;
     if (pass == 0 && !fits) continue;
-    if (pass == 0) Clear_Casing_Mask(r);
     Polyline(r, route, split + 1, ox, oy, NULL, behind + extra, back, behind + extra, back);
     Capsule2(r, split_pt, here, behind + extra, back, behind + extra, back);
     Polyline(r, rest, rest_n, ox, oy, &here, ahead + extra, front, ahead + extra, front);
     if (pass == 0) Apply_Casing_Mask(r);
+  }
+}
+
+// Road points in screen pixels for the current camera, worked out once per frame (LVGL draws the
+// band in ~11 strips, and transforming every point for every strip cost ~12 ms a frame), with
+// each road's screen bounds so strips can skip roads quickly. In PSRAM (internal RAM is for Bluetooth).
+struct Road_Box { float x1, y1, x2, y2; };
+static Pt *screen_pts;
+static Road_Box *screen_box;
+static struct { const Map_Area *area; uint16_t roads; float x, y, h, zoom; lv_coord_t bx, by; } screen_key;
+
+static void Prepare_Screen_Points(const Raster &r)
+{
+  if (screen_key.area == active && screen_key.roads == active->road_count && screen_key.x == cam_x &&
+      screen_key.y == cam_y && screen_key.h == cam_h && screen_key.zoom == zoom &&
+      screen_key.bx == r.box.x1 && screen_key.by == r.box.y1) return;
+  screen_key = { active, active->road_count, cam_x, cam_y, cam_h, zoom, r.box.x1, r.box.y1 };
+  for (uint16_t i = 0; i < active->road_count; i++) {
+    const Map_Road &road = active->roads[i];
+    Road_Box b = { 1e9f, 1e9f, -1e9f, -1e9f };
+    for (uint8_t k = 0; k < road.count; k++) {
+      const int16_t *p = active->points[road.start + k];
+      Pt s = To_Screen(&r.box, p[0], p[1]);
+      screen_pts[road.start + k] = s;
+      b.x1 = Min_F(b.x1, s.x); b.x2 = Max_F(b.x2, s.x);
+      b.y1 = Min_F(b.y1, s.y); b.y2 = Max_F(b.y2, s.y);
+    }
+    screen_box[i] = b;
   }
 }
 
@@ -766,24 +909,24 @@ static void Draw_Event(lv_event_t *e)
   cam_sin = sinf(h);
   cam_cos = cosf(h);
 
-  if (active) {
+  if (active && screen_pts) {
+    Prepare_Screen_Points(r);
     // Minor roads first, so bigger roads are drawn over them
     for (int cls = 3; cls >= 1; cls--) {
       float half = road_width[cls] / 2.0f;
+      float reach = half + 1;
+      float cy1 = r.clip.y1 - reach, cy2 = r.clip.y2 + 1 + reach, cx1 = r.clip.x1 - reach, cx2 = r.clip.x2 + 1 + reach;
       lv_color_t color = lv_color_hex(road_color[cls]);
       for (uint16_t i = 0; i < active->road_count; i++) {
         const Map_Road &road = active->roads[i];
         if (road.road_class != cls) continue;
-        Pt c = To_Screen(&r.box, road.cx, road.cy);
-        float rr = road.radius * zoom + half + 1;
-        if (c.x + rr < r.clip.x1 || c.x - rr > r.clip.x2 || c.y + rr < r.clip.y1 || c.y - rr > r.clip.y2) continue;
-        const int16_t *p0 = active->points[road.start];
-        Pt prev = To_Screen(&r.box, p0[0], p0[1]);
+        const Road_Box &b = screen_box[i];
+        if (b.y2 < cy1 || b.y1 > cy2 || b.x2 < cx1 || b.x1 > cx2) continue;
+        const Pt *s = &screen_pts[road.start];
         for (uint8_t k = 1; k < road.count; k++) {
-          const int16_t *p = active->points[road.start + k];
-          Pt next = To_Screen(&r.box, p[0], p[1]);
-          Capsule(r, prev, next, half, color);
-          prev = next;
+          // Pieces entirely above or below this strip: skip without a call
+          if ((s[k - 1].y < cy1 && s[k].y < cy1) || (s[k - 1].y > cy2 && s[k].y > cy2)) continue;
+          Capsule(r, s[k - 1], s[k], half, color);
         }
       }
     }
@@ -835,6 +978,7 @@ void Map_Layer_Poll(void)
     ready = NULL;
     Map_Area *old = active;
     active = next;
+    screen_key.area = NULL;                   // screen points belong to the old area
     building = old ? old : (next == &areas[0] ? &areas[1] : &areas[0]);
     building->id = 0xFFFF;                    // so the next MAP line starts a fresh area
   }
@@ -887,6 +1031,8 @@ lv_obj_t *Map_Layer_Create(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coor
   lv_obj_add_event_cb(layer, Draw_Event, LV_EVENT_DRAW_MAIN, NULL);
   center_x = marker_x;
   center_y = marker_y;
+  screen_pts = (Pt *)heap_caps_malloc(MAP_MAX_POINTS * sizeof(Pt), MALLOC_CAP_SPIRAM);
+  screen_box = (Road_Box *)heap_caps_malloc(MAP_MAX_ROADS * sizeof(Road_Box), MALLOC_CAP_SPIRAM);
   areas[0].id = areas[1].id = 0xFFFF;
   lv_timer_create(Frame, FRAME_MS, NULL);
   return layer;

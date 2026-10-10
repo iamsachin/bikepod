@@ -657,7 +657,8 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
 void Nav_Screen_Debug(const char *what, bool hide)
 {
   lv_obj_t *obj = strcmp(what, "glow") == 0 ? dbg_glow
-                : strcmp(what, "marker") == 0 ? dbg_marker : strcmp(what, "map") == 0 ? lv_obj_get_child(dbg_area, 0) : NULL;
+                : strcmp(what, "marker") == 0 ? dbg_marker : strcmp(what, "map") == 0 ? lv_obj_get_child(dbg_area, 0)
+                : strcmp(what, "ring") == 0 ? ring : strcmp(what, "eta") == 0 ? eta_label : NULL;
   if (obj) Show_If(obj, !hide);
 }
 
