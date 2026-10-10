@@ -473,10 +473,79 @@ void Nav_Screen_Set_Path(const int16_t (*pts)[2], uint8_t count)
   Route_Line(path_head, casing_head, NULL, 0);
 }
 
-#define MARKER_W 44       // arrow is 31x37, plus room for its white border (pointier at the tip)
-#define MARKER_H 50
-#define MARKER_PAD 6
-#define MARKER_BORDER 2.5f
+/********************************** Position marker **********************************
+ * A navigation arrow with rounded corners, a white border and a light-to-deep blue gradient.
+ * LVGL's polygons have sharp corners, so the marker is rasterised here once at start-up:
+ * the outline is a polygon whose corners are replaced by arcs, and every pixel is sampled at
+ * 4x4 points inside it for smooth edges.
+ *************************************************************************************/
+#define MARKER_W        42
+#define MARKER_H        50
+#define MARKER_OX       21        // where the arrow's origin sits in the canvas
+#define MARKER_OY       28
+#define MARKER_BORDER   2.5f
+#define MARKER_MAX_PTS  96
+
+// Corners in px around the arrow's origin (y down), clockwise on screen, with corner radii
+static const float ARROW[4][2] = { {0, -19}, {15, 17}, {0, 8}, {-15, 17} };   // tip, right, notch, left
+static const float ARROW_R[4] = { 2.5f, 4.0f, 4.0f, 4.0f };   // tip a little tighter so it still points
+
+// Replaces each corner of a closed polygon with an arc of the given radius
+static int Round_Corners(const float (*p)[2], const float *radius, int n, float (*out)[2])
+{
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const float *a = p[(i + n - 1) % n], *b = p[i], *cpt = p[(i + 1) % n];
+    float ux = a[0] - b[0], uy = a[1] - b[1], lu = sqrtf(ux * ux + uy * uy);
+    float vx = cpt[0] - b[0], vy = cpt[1] - b[1], lv = sqrtf(vx * vx + vy * vy);
+    ux /= lu; uy /= lu; vx /= lv; vy /= lv;
+    float half = acosf(LV_CLAMP(-1.0f, ux * vx + uy * vy, 1.0f)) / 2;
+    float t = LV_MIN(radius[i] / tanf(half), 0.45f * LV_MIN(lu, lv));
+    float r = t * tanf(half);
+    float bx = ux + vx, by = uy + vy, lb = sqrtf(bx * bx + by * by);
+    float d = r / sinf(half);
+    float ox = b[0] + bx / lb * d, oy = b[1] + by / lb * d;            // arc centre
+    float a1 = atan2f(b[1] + uy * t - oy, b[0] + ux * t - ox);
+    float a2 = atan2f(b[1] + vy * t - oy, b[0] + vx * t - ox);
+    float sweep = a2 - a1;
+    while (sweep > (float)M_PI) sweep -= 2 * (float)M_PI;
+    while (sweep < -(float)M_PI) sweep += 2 * (float)M_PI;
+    int steps = LV_MAX(2, (int)ceilf(fabsf(sweep) / 0.2f));
+    for (int k = 0; k <= steps && m < MARKER_MAX_PTS; k++) {
+      float ang = a1 + sweep * k / steps;
+      out[m][0] = ox + r * cosf(ang);
+      out[m][1] = oy + r * sinf(ang);
+      m++;
+    }
+  }
+  return m;
+}
+
+// The same polygon pushed out by `d` along every edge (mitred corners)
+static void Offset_Polygon(const float (*p)[2], int n, float d, float (*out)[2])
+{
+  for (int i = 0; i < n; i++) {
+    const float *prev = p[(i + n - 1) % n], *cur = p[i], *next = p[(i + 1) % n];
+    float e1x = cur[0] - prev[0], e1y = cur[1] - prev[1], l1 = sqrtf(e1x * e1x + e1y * e1y);
+    float e2x = next[0] - cur[0], e2y = next[1] - cur[1], l2 = sqrtf(e2x * e2x + e2y * e2y);
+    float n1x = e1y / l1, n1y = -e1x / l1, n2x = e2y / l2, n2y = -e2x / l2;   // outward (clockwise, y down)
+    float mx = n1x + n2x, my = n1y + n2y, lm = sqrtf(mx * mx + my * my);
+    float miter = d / LV_MAX(lm / 2, 0.2f);
+    out[i][0] = cur[0] + mx / lm * miter;
+    out[i][1] = cur[1] + my / lm * miter;
+  }
+}
+
+static bool Inside(const float (*poly)[2], int n, float x, float y)
+{
+  bool in = false;
+  for (int i = 0, j = n - 1; i < n; j = i++) {
+    if ((poly[i][1] > y) != (poly[j][1] > y) &&
+        x < (poly[j][0] - poly[i][0]) * (y - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0])
+      in = !in;
+  }
+  return in;
+}
 
 static void Marker_Create(lv_obj_t *parent)
 {
@@ -490,43 +559,43 @@ static void Marker_Create(lv_obj_t *parent)
   lv_obj_set_style_shadow_spread(glow, 2, 0);
   lv_obj_set_style_shadow_opa(glow, LV_OPA_60, 0);
 
-  // Navigation arrow: tip, right corner, notch, left corner. Drawn as two triangles (the shape
-  // is notched, i.e. not convex). The white border is the same shape pushed out by
-  // MARKER_BORDER along every edge (mitred corners), drawn first with smooth edges.
+  // Outlines: the arrow, and the border = arrow pushed out by MARKER_BORDER with radii grown to
+  // match (convex corners) or shrunk (the notch, which curves the other way)
+  static float inner[MARKER_MAX_PTS][2], outer[MARKER_MAX_PTS][2];
+  float pushed[4][2], pushed_r[4];
+  Offset_Polygon(ARROW, 4, MARKER_BORDER, pushed);
+  for (int i = 0; i < 4; i++) pushed_r[i] = i == 2 ? LV_MAX(ARROW_R[i] - MARKER_BORDER, 0.5f) : ARROW_R[i] + MARKER_BORDER;
+  int n_in = Round_Corners(ARROW, ARROW_R, 4, inner);
+  int n_out = Round_Corners(pushed, pushed_r, 4, outer);
+
   static lv_color_t buf[LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(MARKER_W, MARKER_H)];
   lv_obj_t *canvas = lv_canvas_create(parent);
   lv_canvas_set_buffer(canvas, buf, MARKER_W, MARKER_H, LV_IMG_CF_TRUE_COLOR_ALPHA);
   lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
 
-  const float shape[4][2] = { {16, 0}, {31, 37}, {16, 27}, {1, 37} };   // clockwise on screen
-  float border[4][2];
-  for (int i = 0; i < 4; i++) {
-    const float *prev = shape[(i + 3) % 4], *cur = shape[i], *next = shape[(i + 1) % 4];
-    // Outward normals of the two edges meeting here (clockwise on screen, y down: (dy, -dx))
-    float e1x = cur[0] - prev[0], e1y = cur[1] - prev[1], l1 = sqrtf(e1x * e1x + e1y * e1y);
-    float e2x = next[0] - cur[0], e2y = next[1] - cur[1], l2 = sqrtf(e2x * e2x + e2y * e2y);
-    float n1x = e1y / l1, n1y = -e1x / l1, n2x = e2y / l2, n2y = -e2x / l2;
-    float mx = n1x + n2x, my = n1y + n2y, lm = sqrtf(mx * mx + my * my);
-    float cos_half = lm / 2;                               // between the normals' bisector and each normal
-    float miter = LV_MIN(MARKER_BORDER / LV_MAX(cos_half, 0.2f), 3 * MARKER_BORDER);
-    border[i][0] = cur[0] + mx / lm * miter;
-    border[i][1] = cur[1] + my / lm * miter;
+  const lv_color_t light = lv_color_hex(0x6FA3FF), deep = lv_color_hex(0x2C64E3);
+  for (int py = 0; py < MARKER_H; py++) {
+    for (int px = 0; px < MARKER_W; px++) {
+      int in_out = 0, in_in = 0;
+      for (int sy = 0; sy < 4; sy++) {
+        for (int sx = 0; sx < 4; sx++) {
+          float x = px + (sx + 0.5f) / 4 - MARKER_OX, y = py + (sy + 0.5f) / 4 - MARKER_OY;
+          if (Inside(outer, n_out, x, y)) {
+            in_out++;
+            if (Inside(inner, n_in, x, y)) in_in++;
+          }
+        }
+      }
+      if (!in_out) continue;
+      // Blue gradient from the tip (light) to the base (deep), white where only the border covers
+      float t = LV_CLAMP(0.0f, (py - MARKER_OY + 19) / 36.0f, 1.0f);
+      lv_color_t blue = lv_color_mix(deep, light, (lv_opa_t)lroundf(t * 255));
+      lv_color_t color = lv_color_mix(blue, lv_color_white(), (lv_opa_t)(in_in * 255 / in_out));
+      lv_canvas_set_px_color(canvas, px, py, color);
+      lv_canvas_set_px_opa(canvas, px, py, (lv_opa_t)(in_out * 255 / 16));
+    }
   }
-
-  lv_draw_rect_dsc_t fill;
-  lv_draw_rect_dsc_init(&fill);
-  fill.bg_opa = LV_OPA_COVER;
-  auto draw = [&](const float (*p)[2], lv_color_t color) {
-    auto pt = [&](int i) { return lv_point_t{ (lv_coord_t)lroundf(p[i][0] + MARKER_PAD), (lv_coord_t)lroundf(p[i][1] + MARKER_PAD) }; };
-    lv_point_t left[]  = { pt(0), pt(2), pt(3) };          // tip, notch, left corner
-    lv_point_t right[] = { pt(0), pt(1), pt(2) };          // tip, right corner, notch
-    fill.bg_color = color;
-    lv_canvas_draw_polygon(canvas, left, 3, &fill);
-    lv_canvas_draw_polygon(canvas, right, 3, &fill);
-  };
-  draw(border, lv_color_white());
-  draw(shape, COLOR_BLUE);
-  lv_obj_set_pos(canvas, MARKER_X - 16 - MARKER_PAD, MARKER_Y - MARKER_H / 2);
+  lv_obj_set_pos(canvas, MARKER_X - MARKER_OX, MARKER_Y - MARKER_OY);
 }
 
 /********************************* Screen setup *********************************/
