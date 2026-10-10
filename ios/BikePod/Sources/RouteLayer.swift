@@ -7,7 +7,9 @@ import UIKit
 ///
 /// Ferrostar puts its route below the style's first label layer. In OpenFreeMap's dark style that
 /// layer (water names) comes before every road, so the roads were drawn over the route and only its
-/// white casing showed. Under the road-name labels it sits above the roads in both styles.
+/// white casing showed. In the dark style it now goes over the road names too (below borders and
+/// place names): those are grey with a black outline, which on the blue route read as black text.
+/// (The road being ridden is named in the navigation view's own label.)
 struct RouteLayer: StyleLayerCollection {
     let polyline: MLNPolyline
     let identifier: String
@@ -17,7 +19,7 @@ struct RouteLayer: StyleLayerCollection {
 
     /// Where the route goes in each map style
     static func anchor(dark: Bool) -> LayerReferenceBelow {
-        dark ? .layer(layerId: "highway_name_other") : .symbols
+        dark ? .layer(layerId: "boundary_state") : .symbols
     }
 
     var layers: [StyleLayerDefinition] {

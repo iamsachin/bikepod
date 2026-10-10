@@ -70,7 +70,7 @@ struct ContentView: View {
             case .background:
                 backgroundedAt = Date()
             case .active:
-                if let since = backgroundedAt, Date().timeIntervalSince(since) > 2 { mapGeneration += 1 }
+                if let since = backgroundedAt, Date().timeIntervalSince(since) > 2 { rebuildMap() }
                 backgroundedAt = nil
             default:
                 break
@@ -524,6 +524,37 @@ struct ContentView: View {
             if navigator.phase == .navigating { camera = .automotiveNavigation() }
         }
         UIApplication.shared.isIdleTimerDisabled = true   // keep the phone screen on while navigating
+    }
+
+    /// A fresh map after time away (see the `.id` above). A new map starts at 0°, 0° (mid-Atlantic)
+    /// and a following camera then flew from there to the rider, so it is first placed on the rider,
+    /// facing their way, and only then set to follow again (a move of a few metres)
+    private func rebuildMap() {
+        let following = camera
+        let here = navigator.navState?.preferredUserLocation ?? nil
+        let coordinate = here.map { CLLocationCoordinate2D(latitude: $0.coordinates.lat, longitude: $0.coordinates.lng) }
+            ?? navigator.currentCoordinate
+        let course = Double(here?.courseOverGround?.degrees ?? 0)
+        var placed: MapViewCamera?
+        if let coordinate {
+            switch following.state {
+            case let .trackingUserLocationWithCourse(zoom, pitch, _):
+                placed = .center(coordinate, zoom: zoom, pitch: pitch, direction: course)
+            case let .trackingUserLocation(zoom, pitch, _, direction):
+                placed = .center(coordinate, zoom: zoom, pitch: pitch, direction: direction)
+            case let .trackingUserLocationWithHeading(zoom, pitch, _):
+                placed = .center(coordinate, zoom: zoom, pitch: pitch, direction: course)
+            default:
+                break                       // a fixed view (route preview, arrival) starts where it is
+            }
+        }
+        if let placed { camera = placed }
+        mapGeneration += 1
+        guard placed != nil else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            if camera == placed { camera = following }
+        }
     }
 
     private func stopNavigation() {
