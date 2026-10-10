@@ -16,7 +16,9 @@
 //   FUEL|7|40,85;-120,300     fuel stations in area 7 (same frame as MAP)
 //   MAPEND|7|96               area 7 complete with 96 roads: the pod switches to it
 //   POSE|7|120,-405,853       rider in area 7's frame: x, y and heading in tenths (metres, degrees)
-//   SPD|123                   GPS speed in tenths of a metre per second (for the lean estimate)
+//   SPD|123                   GPS speed in tenths of a metre per second (lean estimate, speed shown)
+//   LIMIT|50                  speed limit where the rider is, km/h (0 = not known)
+//   BUMP|85                   metres to the next mapped speed breaker (0 = none close)
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
@@ -27,7 +29,8 @@
 
 #define NAV_PATH_MAX_POINTS   40
 
-enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_ROUTE, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE };
+enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_ROUTE, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE,
+                MSG_LIMIT, MSG_BUMP };
 
 struct Nav_Message {
   Msg_Kind kind;

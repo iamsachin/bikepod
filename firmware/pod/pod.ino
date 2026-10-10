@@ -57,7 +57,9 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km);
                         Journey_Set(msg.clock, msg.km, msg.km_total, msg.elapsed_s); break;
       case MSG_ROUTE:   Nav_Screen_Set_Route(msg.area_id, msg.path, msg.path_count); break;
-      case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); break;
+      case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); Nav_Screen_Set_Speed(msg.speed_mps); break;
+      case MSG_LIMIT:   Nav_Screen_Set_Limit(msg.speed_kmh); break;
+      case MSG_BUMP:    Nav_Screen_Set_Bump(msg.distance_m); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
       case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); Journey_Clear(); break;

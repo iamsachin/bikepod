@@ -50,6 +50,10 @@ static lv_obj_t *dist_label;
 static lv_obj_t *unit_label;
 static lv_obj_t *road_label;
 static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
+static char eta_text[40] = "";    // ...what it says when no breaker warning is showing
+static lv_obj_t *speed_label, *speed_unit, *limit_sign, *limit_label;
+static int limit_kmh = 0, speed_kmh = -1;           // -1: nothing shown yet
+static uint32_t bump_m = 0;
 static lv_obj_t *stale_veil;
 static lv_obj_t *dbg_glow, *dbg_area, *dbg_marker;   // for serial test commands      // semi-transparent black over everything when the link goes quiet
 
@@ -629,6 +633,24 @@ void Nav_Screen_Create(void)
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
   lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 180);
 
+  /* Speed (bottom left) and the speed limit sign (bottom right), over the faded edge of the map */
+  speed_label = Label_Create(turn_group, &font_title_44, COLOR_TEXT);
+  lv_obj_align(speed_label, LV_ALIGN_TOP_MID, -136, 292);
+  speed_unit = Label_Create(turn_group, &font_small_26, COLOR_GREY);
+  lv_label_set_text(speed_unit, "km/h");
+  lv_obj_align(speed_unit, LV_ALIGN_TOP_MID, -136, 338);
+  limit_sign = Plain_Box(turn_group, 62, 62);
+  lv_obj_set_style_radius(limit_sign, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(limit_sign, lv_color_white(), 0);
+  lv_obj_set_style_bg_opa(limit_sign, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(limit_sign, COLOR_RED, 0);
+  lv_obj_set_style_border_width(limit_sign, 6, 0);
+  lv_obj_align(limit_sign, LV_ALIGN_TOP_MID, 136, 296);
+  limit_label = Label_Create(limit_sign, &font_text_32, lv_color_black());
+  lv_obj_center(limit_label);
+  lv_obj_add_flag(limit_sign, LV_OBJ_FLAG_HIDDEN);
+  Nav_Screen_Set_Speed(0);
+
   /* Shared bottom line: arrival time and distance left */
   eta_label = Label_Create(scr, &font_text_32, COLOR_SOFT);
   lv_obj_align(eta_label, LV_ALIGN_TOP_MID, 0, 386);
@@ -708,10 +730,10 @@ void Nav_Screen_Show_Cruise(uint32_t speed_kmh, const char *clock)
 
 void Nav_Screen_Set_Trip(const char *eta, float km_left)
 {
-  char text[40], clock[12];
+  char clock[12];
   Settings_Format_Clock(eta, clock, sizeof(clock));
-  snprintf(text, sizeof(text), "%s " MIDDLE_DOT " %.1f km", clock, km_left);
-  Set_Text(eta_label, text);
+  snprintf(eta_text, sizeof(eta_text), "%s " MIDDLE_DOT " %.1f km", clock, km_left);
+  if (bump_m == 0) Set_Text(eta_label, eta_text);       // a breaker warning has the line for now
   have_trip = true;
   Show_If(eta_label, mode == MODE_TURN || mode == MODE_REROUTING);
 }
@@ -724,6 +746,59 @@ void Nav_Screen_Set_Stale(bool now_stale)
   // A plain veil: setting opacity on whole groups made LVGL render them through a layer,
   // which broke with the map's draw callback
   Show_If(stale_veil, stale);
+}
+
+static void Update_Speed_Colour(void)
+{
+  bool over = limit_kmh > 0 && speed_kmh > limit_kmh + 2;
+  lv_obj_set_style_text_color(speed_label, over ? COLOR_RED : COLOR_TEXT, 0);
+}
+
+void Nav_Screen_Set_Speed(float metres_per_second)
+{
+  int kmh = (int)lroundf(LV_MAX(metres_per_second, 0.0f) * 3.6f);
+  if (kmh == speed_kmh) return;
+  speed_kmh = kmh;
+  char text[8];
+  snprintf(text, sizeof(text), "%d", kmh);
+  Set_Text(speed_label, text);
+  Update_Speed_Colour();
+}
+
+void Nav_Screen_Set_Limit(uint32_t kmh)
+{
+  if ((int)kmh == limit_kmh) return;
+  limit_kmh = (int)kmh;
+  if (kmh > 0) {
+    char text[8];
+    snprintf(text, sizeof(text), "%lu", (unsigned long)kmh);
+    Set_Text(limit_label, text);
+    // Three digits need the smaller font to fit the sign
+    lv_obj_set_style_text_font(limit_label, kmh >= 100 ? &font_small_26 : &font_text_32, 0);
+    lv_obj_center(limit_label);
+  }
+  Show_If(limit_sign, kmh > 0);
+  Update_Speed_Colour();
+}
+
+void Nav_Screen_Set_Bump(uint32_t metres)
+{
+  // Rounded so the line doesn't flicker every metre: 10 m steps, 5 m when close
+  uint32_t step = metres > 50 ? 10 : 5;
+  uint32_t shown = metres == 0 ? 0 : LV_MAX((metres + step / 2) / step * step, step);
+  if (shown == bump_m) return;
+  bump_m = shown;
+  if (bump_m > 0) {
+    char text[40];
+    snprintf(text, sizeof(text), "Speed breaker " MIDDLE_DOT " %lu m", (unsigned long)bump_m);
+    Set_Text(eta_label, text);
+    lv_obj_set_style_text_color(eta_label, COLOR_AMBER, 0);
+    Show_If(eta_label, mode == MODE_TURN);
+  } else {
+    Set_Text(eta_label, eta_text);
+    lv_obj_set_style_text_color(eta_label, COLOR_SOFT, 0);
+    Show_If(eta_label, have_trip && (mode == MODE_TURN || mode == MODE_REROUTING));
+  }
 }
 
 void Nav_Screen_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)

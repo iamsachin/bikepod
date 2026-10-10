@@ -126,6 +126,16 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   String kind = Field(text, 0);
   memset(msg, 0, sizeof(*msg));
 
+  if (kind == "LIMIT") {
+    msg->kind = MSG_LIMIT;
+    msg->speed_kmh = Field(text, 1).toInt();
+    return true;
+  }
+  if (kind == "BUMP") {
+    msg->kind = MSG_BUMP;
+    msg->distance_m = Field(text, 1).toInt();
+    return true;
+  }
   if (kind == "SPD") {
     msg->kind = MSG_SPEED;
     msg->speed_mps = Field(text, 1).toInt() / 10.0f;
@@ -208,7 +218,7 @@ static void Handle_Line(const String &text)
     LOG("BLE: ignored \"%s\"\r\n", text.c_str());
     return;
   }
-  if (msg.kind != MSG_ROUTE && msg.kind != MSG_POSE && msg.kind != MSG_SPEED) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
+  if (msg.kind != MSG_ROUTE && msg.kind != MSG_POSE && msg.kind != MSG_SPEED && msg.kind != MSG_BUMP) LOG("BLE: %s\r\n", text.c_str());   // paths are too chatty to log
   portENTER_CRITICAL(&msg_lock);
   if (queue_count == QUEUE_SIZE) {          // full: drop the oldest, the newest matters most
     queue_head = (queue_head + 1) % QUEUE_SIZE;

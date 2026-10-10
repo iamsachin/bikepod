@@ -65,6 +65,9 @@ final class Navigator {
     @ObservationIgnored private var poseLine = ""          // latest "POSE|..." rider in the map area
     @ObservationIgnored private var mapSentForConnection = -1
     private let mapFeed = MapFeed()
+    private let hazards = Hazards()
+    @ObservationIgnored private var limitLine = ""         // latest "LIMIT|50" (0 = not known here)
+    @ObservationIgnored private var bumpLine = ""          // latest "BUMP|85" (0 = none close)
     /// Sees Valhalla's raw answers on their way into Ferrostar, to keep the junction details
     private let junctionCapture = JunctionCapture()
     @ObservationIgnored private var pathAlong: Double?     // rider's last position along the route, metres
@@ -235,6 +238,9 @@ final class Navigator {
         tripLine = ""
         pathLine = ""
         poseLine = ""
+        limitLine = ""
+        bumpLine = ""
+        hazards.clear()
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -287,6 +293,12 @@ final class Navigator {
             DebugLog.write("TURN \(turnLine) (type \(String(describing: content.maneuverType)), modifier \(String(describing: content.maneuverModifier)), degrees \(content.roundaboutExitDegrees.map(String.init) ?? "-"))")
         }
 
+        let newLimit = "LIMIT|\(Self.speedLimit(state.currentAnnotationJSON) ?? 0)"
+        if newLimit != limitLine {
+            DebugLog.write("\(newLimit) (annotation \(state.currentAnnotationJSON?.prefix(120) ?? "none"))")
+        }
+        limitLine = newLimit
+
         let eta = Date().addingTimeInterval(progress.durationRemaining)
         // Arrival time, km left, the route's total and seconds riding (for the pod's journey screen)
         tripLine = String(format: "TRIP|%@|%.1f|%.1f|%d", Self.clockFormat.string(from: eta), remainingKm,
@@ -294,6 +306,7 @@ final class Navigator {
 
         if state.routeGeometry.count != pathRouteCount {   // new route: forget the old position
             pathRouteCount = state.routeGeometry.count
+            hazards.load(route: state.routeGeometry)
             pathAlong = nil
         }
         let junctions = core?.route.map { junctionCapture.junctions(forRouteDistance: $0.distance) } ?? []
@@ -302,6 +315,9 @@ final class Navigator {
                                          metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
                                          junctions: junctions) {
             pathAlong = result.along
+            // Next mapped speed breaker, if one is close
+            let toBump = hazards.next(after: result.along)
+            bumpLine = "BUMP|\(toBump.map { $0 <= 200 ? Int($0.rounded()) : 0 } ?? 0)"
             // Route for the pod's map, in the map area's fixed frame (whole metres from the area's
             // reference point): the same route gives the same numbers every update, so it doesn't
             // wobble the way points relative to the moving rider did
@@ -348,7 +364,8 @@ final class Navigator {
             guard !turnLine.isEmpty else { return [] }   // first instruction not computed yet
             // Turn first (the pod zooms from the turn distance), poses before the route (the pod
             // anchors the route to the latest pose)
-            return [("turn", turnLine), ("pose", poseLine), ("path", pathLine), ("trip", tripLine)]
+            return [("turn", turnLine), ("pose", poseLine), ("path", pathLine), ("trip", tripLine),
+                    ("limit", limitLine), ("bump", bumpLine)]
                 .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
@@ -381,11 +398,23 @@ final class Navigator {
             let last = lastPodSent[kind]
             let age = now.timeIntervalSince(last?.at ?? .distantPast)
             let changed = line != last?.line
-            let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose") || kind == "speed"
+            let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose") || kind == "speed" || kind == "bump"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
             link.send(line: line, kind: kind)
         }
+    }
+
+    /// The speed limit (km/h) where the rider is, from the route's per-segment data (OSM maxspeed);
+    /// nil where the map doesn't say
+    static func speedLimit(_ annotationJSON: String?) -> Int? {
+        guard let data = annotationJSON?.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let maxspeed = object["maxspeed"] as? [String: Any],
+              let speed = maxspeed["speed"] as? Double, speed > 0
+        else { return nil }
+        let kmh = (maxspeed["unit"] as? String) == "mph" ? speed * 1.609 : speed
+        return Int(kmh.rounded())
     }
 
     /// A routing error in plain words
