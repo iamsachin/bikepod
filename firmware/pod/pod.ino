@@ -13,6 +13,7 @@
 #include "Map_Layer.h"
 #include "Lean_Screen.h"
 #include "Pages.h"
+#include "Journey_Screen.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -42,7 +43,7 @@ static void Pod_Tick(lv_timer_t *timer)
   Map_Layer_Poll();
 
   if (!BLE_Link_Connected()) {
-    if (Nav_Screen_Mode() != MODE_WAITING) Nav_Screen_Show_Waiting();
+    if (Nav_Screen_Mode() != MODE_WAITING) { Nav_Screen_Show_Waiting(); Journey_Clear(); }
     return;
   }
 
@@ -52,13 +53,14 @@ static void Pod_Tick(lv_timer_t *timer)
     got_any = true;
     switch (msg.kind) {
       case MSG_TURN:    Show_Turn(msg); break;
-      case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km); break;
+      case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km);
+                        Journey_Set(msg.clock, msg.km, msg.km_total, msg.elapsed_s); break;
       case MSG_ROUTE:   Nav_Screen_Set_Route(msg.area_id, msg.path, msg.path_count); break;
       case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(); break;
-      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); break;
-      case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); break;
+      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); Journey_Clear(); break;
+      case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); Journey_Clear(); break;
     }
   }
   if (got_any) {
@@ -86,7 +88,8 @@ void setup()
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
-  Lean_Screen_Create(lv_scr_act()); // hidden until you swipe right; calibrates: keep still at power-on
+  Journey_Screen_Create(lv_scr_act());   // swipe right from navigation
+  Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
   Pages_Init();
   BLE_Link_Init();
   lv_timer_create(Pod_Tick, 50, NULL);

@@ -288,7 +288,9 @@ final class Navigator {
         }
 
         let eta = Date().addingTimeInterval(progress.durationRemaining)
-        tripLine = String(format: "TRIP|%@|%.1f", Self.clockFormat.string(from: eta), remainingKm)
+        // Arrival time, km left, the route's total and seconds riding (for the pod's journey screen)
+        tripLine = String(format: "TRIP|%@|%.1f|%.1f|%d", Self.clockFormat.string(from: eta), remainingKm,
+                          tripKm, Int(Date().timeIntervalSince(tripStartedAt)))
 
         if state.routeGeometry.count != pathRouteCount {   // new route: forget the old position
             pathRouteCount = state.routeGeometry.count

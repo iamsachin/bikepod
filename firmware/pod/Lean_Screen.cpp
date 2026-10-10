@@ -17,6 +17,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include "Gyro_QMI8658.h"
+#include "Pages.h"
 
 LV_FONT_DECLARE(font_big_104);
 LV_FONT_DECLARE(font_title_44);
@@ -374,17 +375,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   cal_label = Label(root, &font_small_26, COLOR_DIM);
   lv_obj_align(cal_label, LV_ALIGN_TOP_MID, 0, 392);
 
-  // Page dots: navigation, lean (this one)
-  lv_obj_t *dots = Box(root, LV_SIZE_CONTENT, 4);
-  lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(dots, 6, 0);
-  lv_obj_align(dots, LV_ALIGN_TOP_MID, 0, 432);
-  for (int i = 0; i < 2; i++) {
-    lv_obj_t *dot = Box(dots, i == 1 ? 18 : 6, 4);
-    lv_obj_set_style_radius(dot, 2, 0);
-    lv_obj_set_style_bg_color(dot, i == 1 ? lv_color_white() : COLOR_DIM, 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-  }
+  Pages_Add_Dots(root, 2);
 
   lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 

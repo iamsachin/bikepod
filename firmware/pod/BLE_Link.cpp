@@ -147,6 +147,8 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     msg->kind = MSG_TRIP;
     Field(text, 1).toCharArray(msg->clock, sizeof(msg->clock));
     msg->km = Field(text, 2).toFloat();
+    msg->km_total = Field(text, 3).toFloat();
+    msg->elapsed_s = Field(text, 4).toInt();
     return true;
   }
   if (kind == "RPATH") {
