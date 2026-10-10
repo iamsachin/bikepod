@@ -9,8 +9,8 @@ import MapLibre
 /// along the segment it found, which went wrong in two ways: at a vertex it sometimes took the
 /// previous segment's direction, and at a turn the arrow stayed pinned to the corner, pointing
 /// the old way, until the next instruction began. Here the GPS position is projected onto the
-/// whole route and the arrow points along the route from 3 m behind to 10 m ahead: it follows
-/// the road and turns smoothly through corners. Further than 30 m from the route, Ferrostar's own
+/// whole route and the arrow points along the road it is on (1 m behind to 2 m ahead): it
+/// follows the road and turns at the corner itself. Further than 30 m from the route, Ferrostar's own
 /// placement is kept.
 struct RoutePuck {
     private(set) var along: Double?          // metres along the route, to search near next time
@@ -64,7 +64,10 @@ struct RoutePuck {
             return (pts[i].x + t * (pts[i + 1].x - pts[i].x), pts[i].y + t * (pts[i + 1].y - pts[i].y))
         }
         let here = point(at: best.s)
-        let from = point(at: best.s - 3), to = point(at: best.s + 10)
+        // Along the road where the arrow is: only 1 m behind to 2 m ahead, so it smooths the
+        // route line's small kinks but turns crisply at a corner (3 m behind to 10 m ahead cut the
+        // corner: at a right-angle turn the arrow sat diagonally across both roads)
+        let from = point(at: best.s - 1), to = point(at: best.s + 2)
         var course = atan2(to.x - from.x, to.y - from.y) * 180 / .pi   // clockwise from north
         if course < 0 { course += 360 }
 
