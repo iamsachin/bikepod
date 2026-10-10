@@ -790,7 +790,8 @@ void Nav_Screen_Set_Bump(uint32_t metres)
   bump_m = shown;
   if (bump_m > 0) {
     char text[40];
-    snprintf(text, sizeof(text), "Speed breaker " MIDDLE_DOT " %lu m", (unsigned long)bump_m);
+    // Short: the bottom line is where the round screen is narrow ("Speed breaker" reached the ring)
+    snprintf(text, sizeof(text), "Breaker " MIDDLE_DOT " %lu m", (unsigned long)bump_m);
     Set_Text(eta_label, text);
     lv_obj_set_style_text_color(eta_label, COLOR_AMBER, 0);
     Show_If(eta_label, mode == MODE_TURN);
