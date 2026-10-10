@@ -486,7 +486,13 @@ struct ContentView: View {
     private func startNavigation() {
         navigator.startNavigation()
         guard navigator.phase == .navigating else { return }
-        camera = .automotiveNavigation()
+        // Follow the rider only once the navigation layout is up: set straight away, the camera
+        // centred the rider for the old layout (mid-screen) while the arrow is drawn near the
+        // bottom, so a rider standing still saw the arrow far from the route start
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            if navigator.phase == .navigating { camera = .automotiveNavigation() }
+        }
         UIApplication.shared.isIdleTimerDisabled = true   // keep the phone screen on while navigating
     }
 

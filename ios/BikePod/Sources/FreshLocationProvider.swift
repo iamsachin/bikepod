@@ -23,7 +23,11 @@ final class FreshLocationProvider: NSObject, LocationProviding, ObservableObject
                                      allowBackgroundLocationUpdates: allowBackgroundLocationUpdates)
         super.init()
         inner.delegate = self
-        if let cached = inner.lastLocation, Self.isGood(cached) { lastLocation = cached }
+        if let cached = inner.lastLocation {
+            DebugLog.write(String(format: "CACHED %.6f,%.6f acc %.0f m age %.0f s %@", cached.coordinates.lat, cached.coordinates.lng,
+                                  cached.horizontalAccuracy, -cached.timestamp.timeIntervalSinceNow, Self.isGood(cached) ? "ok" : "REJECTED"))
+            if Self.isGood(cached) { lastLocation = cached }
+        }
     }
 
     var authorizationStatus: CLAuthorizationStatus { inner.authorizationStatus }
@@ -40,6 +44,10 @@ final class FreshLocationProvider: NSObject, LocationProviding, ObservableObject
 
 extension FreshLocationProvider: LocationManagingDelegate {
     func locationManager(_: LocationProviding, didUpdateLocations locations: [UserLocation]) {
+        for l in locations where !Self.isGood(l) {            // only the ones held back
+            DebugLog.write(String(format: "FIX %.6f,%.6f acc %.0f m age %.1f s %@", l.coordinates.lat, l.coordinates.lng,
+                                  l.horizontalAccuracy, -l.timestamp.timeIntervalSinceNow, Self.isGood(l) ? "ok" : "REJECTED"))
+        }
         let good = locations.filter(Self.isGood)
         guard let latest = good.last else { return }
         lastLocation = latest

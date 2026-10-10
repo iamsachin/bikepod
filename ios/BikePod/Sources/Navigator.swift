@@ -73,6 +73,7 @@ final class Navigator {
     @ObservationIgnored private var tripKm = 0.0
     @ObservationIgnored private var podFeed: Task<Void, Never>?
     @ObservationIgnored private var routeRequestID = UUID()
+    @ObservationIgnored private var navStatesLogged = 0
 
     init(link: PodLink) {
         self.link = link
@@ -154,6 +155,9 @@ final class Navigator {
                 return
             }
             phase = .preview(route)
+            DebugLog.write(String(format: "PLAN from %.6f,%.6f (acc %.0f m); route starts %.6f,%.6f",
+                                  origin.coordinates.lat, origin.coordinates.lng, origin.horizontalAccuracy,
+                                  route.geometry.first?.lat ?? 0, route.geometry.first?.lng ?? 0))
             // Fetch the map tiles around the start now, so the pod's map is ready the moment
             // guidance starts (it showed only the route until they had downloaded)
             if let first = route.geometry.first { mapFeed.prefetch(lat: first.lat, lng: first.lng) }
@@ -189,6 +193,10 @@ final class Navigator {
             stateWatch = core.$state
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] state in self?.handle(state) }
+            DebugLog.write(String(format: "START simulate=%d provider last %.6f,%.6f acc %.0f", simulate ? 1 : 0,
+                                  provider.lastLocation?.coordinates.lat ?? 0, provider.lastLocation?.coordinates.lng ?? 0,
+                                  provider.lastLocation?.horizontalAccuracy ?? -1))
+            navStatesLogged = 0
             try core.startNavigation(route: route)
             tripStartedAt = Date()
             tripKm = route.distance / 1000
@@ -233,6 +241,12 @@ final class Navigator {
     private func handle(_ state: NavigationState?) {
         navState = state
         guard let state else { return }
+        if navStatesLogged < 15 {
+            navStatesLogged += 1
+            let p = state.preferredUserLocation
+            DebugLog.write(String(format: "STATE %d navigating=%d user %.6f,%.6f acc %.0f", navStatesLogged, state.isNavigating ? 1 : 0,
+                                  p?.coordinates.lat ?? 0, p?.coordinates.lng ?? 0, p?.horizontalAccuracy ?? -1))
+        }
         rerouting = state.isCalculatingNewRoute
 
         if case .complete = state.tripState {
