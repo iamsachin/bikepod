@@ -12,24 +12,27 @@
 #include "Settings.h"
 
 LV_FONT_DECLARE(font_status_20);
+LV_FONT_DECLARE(font_bolt_16);
 
 #define COLOR_OUTLINE   lv_color_hex(0x8C8C8C)
 #define COLOR_FILL      lv_color_hex(0xE6E6E6)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
 #define COLOR_AMBER     lv_color_hex(0xF5B83D)
 #define COLOR_RED       lv_color_hex(0xE5484D)
+#define COLOR_GREEN     lv_color_hex(0x34C759)
 
 #define LOW_PERCENT       20
 #define CRITICAL_PERCENT  10
 
-// Battery drawing: a 30x15 rounded outline, a nub, and a fill bar inside
-#define BODY_W    30
-#define BODY_H    15
+// Battery drawing: a 34x18 rounded outline, a nub, and a fill bar inside
+#define BODY_W    34
+#define BODY_H    18
 #define BORDER    2
 #define INSET     2               // gap between the outline and the fill
 #define FILL_W    (BODY_W - 2 * (BORDER + INSET))
+#define ICON_BOLT "\xEE\xA8\x8B"     // U+EA0B, Material Icons Round
 
-static lv_obj_t *row, *battery, *body, *nub, *fill, *percent_label;
+static lv_obj_t *row, *battery, *body, *nub, *fill, *bolt, *percent_label;
 
 static lv_obj_t *Plain(lv_obj_t *parent)
 {
@@ -72,17 +75,23 @@ static void Tick(lv_timer_t *timer)
   int percent = Battery_Percent();
   if (percent < 0) return;
 
-  // Level 0 = fine, 1 = low, 2 = critical; a few percent of margin before it counts as
-  // recovered, so a reading hovering at 20% doesn't blink on and off
+  // Level 0 = fine, 1 = low, 2 = critical, 3 = charging; a few percent of margin before it
+  // counts as recovered, so a reading hovering at 20% doesn't blink on and off
   static int level = 0;
-  int new_level = percent <= CRITICAL_PERCENT ? 2 : percent <= LOW_PERCENT ? 1 : 0;
-  if (new_level < level && percent < (level == 2 ? CRITICAL_PERCENT : LOW_PERCENT) + 3) new_level = level;
+  bool charging = Battery_Charging();
+  int new_level = charging ? 3 : percent <= CRITICAL_PERCENT ? 2 : percent <= LOW_PERCENT ? 1 : 0;
+  if (!charging && level != 3 && new_level < level &&
+      percent < (level == 2 ? CRITICAL_PERCENT : LOW_PERCENT) + 3) new_level = level;
   if (new_level != level) {
     level = new_level;
-    if (level == 2) Set_Colour(COLOR_RED, COLOR_RED, COLOR_RED);
+    // Charging: a green bar with a white bolt in the middle, like a phone
+    if (level == 3) Set_Colour(COLOR_OUTLINE, COLOR_GREEN, COLOR_GREY);
+    else if (level == 2) Set_Colour(COLOR_RED, COLOR_RED, COLOR_RED);
     else if (level == 1) Set_Colour(COLOR_AMBER, COLOR_AMBER, COLOR_AMBER);
     else Set_Colour(COLOR_OUTLINE, COLOR_FILL, COLOR_GREY);
-    if (level > 0) Pulse();
+    if (level == 3) lv_obj_clear_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+    if (level == 1 || level == 2) Pulse();
   }
 
   static int shown = -1;
@@ -94,8 +103,9 @@ static void Tick(lv_timer_t *timer)
 
   int page = Pages_Current();
   bool info_screen = page == 0 && Nav_Screen_Mode() != MODE_TURN;   // waiting, cruise, arrived...
+  bool low = level == 1 || level == 2;
   bool show = !Call_Screen_Showing() &&
-              (Settings_Panel_Open() || level > 0 || info_screen || page == 1 || page == 2);
+              (Settings_Panel_Open() || low || info_screen || page == 1 || page == 2);
   if (show == lv_obj_has_flag(battery, LV_OBJ_FLAG_HIDDEN)) {
     if (show) lv_obj_clear_flag(battery, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(battery, LV_OBJ_FLAG_HIDDEN);
@@ -103,12 +113,16 @@ static void Tick(lv_timer_t *timer)
 
   // Tell the app: on a change, and every 30 s (so it knows soon after connecting)
   static int sent = -1;
+  static bool sent_charging = false;
   static uint32_t sent_ms = 0;
-  if (BLE_Link_Connected() && (percent != sent || millis() - sent_ms > 30000) && millis() - sent_ms > 5000) {
-    char line[24];
-    snprintf(line, sizeof(line), "BATTERY|%d|%.3f", percent, Battery_Volts());   // volts: for calibrating
+  bool changed = percent != sent || charging != sent_charging;
+  if (BLE_Link_Connected() && (changed || millis() - sent_ms > 30000) && millis() - sent_ms > 5000) {
+    char line[32];
+    // volts: for calibrating the curve; last field 1 = charging
+    snprintf(line, sizeof(line), "BATTERY|%d|%.3f|%d", percent, Battery_Volts(), charging ? 1 : 0);
     BLE_Link_Notify(line);
     sent = percent;
+    sent_charging = charging;
     sent_ms = millis();
   }
 }
@@ -141,8 +155,15 @@ void Status_Bar_Create(void)
   lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
   lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);
 
+  bolt = lv_label_create(body);
+  lv_obj_set_style_text_font(bolt, &font_bolt_16, 0);
+  lv_obj_set_style_text_color(bolt, lv_color_white(), 0);
+  lv_label_set_text(bolt, ICON_BOLT);
+  lv_obj_center(bolt);
+  lv_obj_add_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+
   nub = Plain(battery);
-  lv_obj_set_size(nub, 3, 6);
+  lv_obj_set_size(nub, 3, 7);
   lv_obj_set_style_radius(nub, 1, 0);
   lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
   lv_obj_set_style_pad_left(nub, 0, 0);

@@ -109,7 +109,7 @@ struct PodPill: View {
             Text(link.state == .connected ? "Connected" : link.state == .bluetoothOff ? "Bluetooth off" : "Searching…")
                 .foregroundStyle(.secondary)
             if link.state == .connected, let battery = link.podBattery {
-                PodBatteryLabel(percent: battery)
+                PodBatteryLabel(percent: battery, charging: link.podCharging)
             }
         }
         .font(.footnote)
@@ -133,26 +133,29 @@ struct PodStatusLabel: View {
             Text(link.state == .connected ? "Pod connected" : link.state.rawValue)
             if link.state == .connected, let battery = link.podBattery {
                 Spacer()
-                PodBatteryLabel(percent: battery)
+                PodBatteryLabel(percent: battery, charging: link.podCharging)
             }
         }
     }
 }
 
-/// The pod's battery: an icon by level and the percentage, orange when low and red when nearly empty
+/// The pod's battery: an icon by level and the percentage, orange when low, red when nearly empty,
+/// green with a bolt while charging
 struct PodBatteryLabel: View {
     let percent: Int
+    let charging: Bool
 
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: symbol)
             Text("\(percent)%").monospacedDigit()
         }
-        .foregroundStyle(percent <= 10 ? Color.red : percent <= 20 ? Color.orange : Color.secondary)
-        .accessibilityLabel("Pod battery \(percent) percent")
+        .foregroundStyle(charging ? Color.green : percent <= 10 ? Color.red : percent <= 20 ? Color.orange : Color.secondary)
+        .accessibilityLabel("Pod battery \(percent) percent\(charging ? ", charging" : "")")
     }
 
     private var symbol: String {
+        if charging { return "battery.100percent.bolt" }
         switch percent {
         case ..<13: "battery.0percent"
         case ..<38: "battery.25percent"
