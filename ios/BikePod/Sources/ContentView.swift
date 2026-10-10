@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var camera: MapViewCamera = .trackUserLocation(zoom: 14)
     @State private var showPodTest = false
     @State private var showRides = false
+    /// Feeds the navigation map the navigator's arrow placement (see RoutePuck)
+    @State private var puckManager = RoutePuckLocationManager()
     @FocusState private var searchFocused: Bool
 
     private var isNavigating: Bool { navigator.phase == .navigating }
@@ -45,6 +47,7 @@ struct ContentView: View {
             styleURL: mapStyle,
             camera: $camera,
             navigationState: navigator.navState,
+            locationManagerConfiguration: NavigationLocationManagerConfiguration(navigatingLocationManager: puckManager),
             isMuted: navigator.isMuted,
             onTapMute: { navigator.toggleMute() },
             onTapExit: { stopNavigation() }
@@ -126,7 +129,10 @@ struct ContentView: View {
             }
         }
         .sensoryFeedback(.warning, trigger: navigator.rerouting) { _, rerouting in rerouting }
-        .task { navigator.activate() }                  // GPS after the first screen is up
+        .task {
+            puckManager.placement = { [navigator] in navigator.puckLocation }
+            navigator.activate()                        // GPS after the first screen is up
+        }
     }
 
     // MARK: Top: search, saved places, pod
@@ -531,10 +537,12 @@ struct ContentView: View {
     /// facing their way, and only then set to follow again (a move of a few metres)
     private func rebuildMap() {
         let following = camera
+        let puck = navigator.puckLocation
         let here = navigator.navState?.preferredUserLocation ?? nil
-        let coordinate = here.map { CLLocationCoordinate2D(latitude: $0.coordinates.lat, longitude: $0.coordinates.lng) }
+        let coordinate = puck?.coordinate
+            ?? here.map { CLLocationCoordinate2D(latitude: $0.coordinates.lat, longitude: $0.coordinates.lng) }
             ?? navigator.currentCoordinate
-        let course = Double(here?.courseOverGround?.degrees ?? 0)
+        let course = puck.map { max(0, $0.course) } ?? Double(here?.courseOverGround?.degrees ?? 0)
         var placed: MapViewCamera?
         if let coordinate {
             switch following.state {

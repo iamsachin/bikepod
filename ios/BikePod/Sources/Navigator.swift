@@ -51,6 +51,9 @@ final class Navigator {
     var simulationSpeed: UInt64 = 4
     /// The finished trip, for the Arrived card
     private(set) var lastTrip: (km: Double, seconds: TimeInterval)?
+    /// The arrow on the phone's navigation map: on the route, pointing along it (see RoutePuck)
+    @ObservationIgnored private(set) var puckLocation: CLLocation?
+    @ObservationIgnored private var routePuck = RoutePuck()
     /// Past rides; the one in progress is recorded as it goes
     let history = RideHistory()
     @ObservationIgnored private var recorder: RideRecorder?
@@ -278,6 +281,8 @@ final class Navigator {
         hazards.clear()
         rerouting = false
         rerouteHeldUntil = .distantPast
+        puckLocation = nil
+        routePuck = RoutePuck()
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -313,6 +318,11 @@ final class Navigator {
             return
         }
         if let location = state.preferredUserLocation { recorder?.add(location) }
+        if case let .navigating(_, raw, _, _, _, _, _, _, _, _, _) = state.tripState {
+            puckLocation = routePuck.place(raw, on: state.routeGeometry)
+        } else {
+            puckLocation = nil
+        }
         guard state.isNavigating,
               let progress = state.currentProgress,
               let content = state.currentVisualInstruction?.primaryContent
