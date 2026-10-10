@@ -15,9 +15,8 @@ void Nav_Screen_Set_Pose(uint16_t area_id, float x, float y, float heading_deg);
 void Nav_Screen_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count);
 // Bottom line on the turn and rerouting screens: arrival time and kilometres left
 void Nav_Screen_Set_Trip(const char *eta, float km_left);
-// Speed (bottom left), the speed limit sign (bottom right, hidden at 0) and a speed breaker
-// warning in place of the arrival line (metres ahead, 0 = none)
-void Nav_Screen_Set_Speed(float metres_per_second);
+// The speed limit sign (bottom right, hidden at 0) and a speed breaker warning in place of the
+// arrival line (metres ahead, 0 = none)
 void Nav_Screen_Set_Limit(uint32_t kmh);
 void Nav_Screen_Set_Bump(uint32_t metres);
 void Nav_Screen_Show_Waiting(void);

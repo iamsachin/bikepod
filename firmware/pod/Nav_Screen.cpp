@@ -53,8 +53,8 @@ static lv_obj_t *unit_label;
 static lv_obj_t *road_label;
 static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
 static char eta_text[40] = "";    // ...what it says when no breaker warning is showing
-static lv_obj_t *speed_label, *speed_unit, *limit_sign, *limit_label;
-static int limit_kmh = 0, speed_kmh = -1;           // -1: nothing shown yet
+static lv_obj_t *limit_sign, *limit_label;
+static int limit_kmh = 0;
 static uint32_t bump_m = 0;
 static lv_obj_t *stale_veil;
 static lv_obj_t *dbg_glow, *dbg_area, *dbg_marker;   // for serial test commands      // semi-transparent black over everything when the link goes quiet
@@ -651,12 +651,8 @@ void Nav_Screen_Create(void)
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
   lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 180);
 
-  /* Speed (bottom left) and the speed limit sign (bottom right), over the faded edge of the map */
-  speed_label = Label_Create(turn_group, &font_title_44, COLOR_TEXT);
-  lv_obj_align(speed_label, LV_ALIGN_TOP_MID, -136, 292);
-  speed_unit = Label_Create(turn_group, &font_small_26, COLOR_GREY);
-  lv_label_set_text(speed_unit, "km/h");
-  lv_obj_align(speed_unit, LV_ALIGN_TOP_MID, -136, 338);
+  /* The speed limit sign (bottom right), over the faded edge of the map. No speed: the bike's
+     speedometer shows it */
   limit_sign = Plain_Box(turn_group, 62, 62);
   lv_obj_set_style_radius(limit_sign, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(limit_sign, lv_color_white(), 0);
@@ -667,9 +663,6 @@ void Nav_Screen_Create(void)
   limit_label = Label_Create(limit_sign, &font_text_32, lv_color_black());
   lv_obj_center(limit_label);
   lv_obj_add_flag(limit_sign, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(speed_label, LV_OBJ_FLAG_HIDDEN);   // shown with a speed limit (Nav_Screen_Set_Limit)
-  lv_obj_add_flag(speed_unit, LV_OBJ_FLAG_HIDDEN);
-  Nav_Screen_Set_Speed(0);
 
   /* Shared bottom line: arrival time and distance left */
   eta_label = Label_Create(scr, &font_text_32, COLOR_SOFT);
@@ -771,23 +764,6 @@ void Nav_Screen_Set_Stale(bool now_stale)
   Show_If(stale_veil, stale);
 }
 
-static void Update_Speed_Colour(void)
-{
-  bool over = limit_kmh > 0 && speed_kmh > limit_kmh + 2;
-  lv_obj_set_style_text_color(speed_label, over ? COLOR_RED : COLOR_TEXT, 0);
-}
-
-void Nav_Screen_Set_Speed(float metres_per_second)
-{
-  int kmh = (int)lroundf(LV_MAX(metres_per_second, 0.0f) * 3.6f);
-  if (kmh == speed_kmh) return;
-  speed_kmh = kmh;
-  char text[8];
-  snprintf(text, sizeof(text), "%d", kmh);
-  Set_Text(speed_label, text);
-  Update_Speed_Colour();
-}
-
 void Nav_Screen_Set_Limit(uint32_t kmh)
 {
   if ((int)kmh == limit_kmh) return;
@@ -801,10 +777,6 @@ void Nav_Screen_Set_Limit(uint32_t kmh)
     lv_obj_center(limit_label);
   }
   Show_If(limit_sign, kmh > 0);
-  // Speed only alongside a limit: on its own it isn't needed (the phone shows it)
-  Show_If(speed_label, kmh > 0);
-  Show_If(speed_unit, kmh > 0);
-  Update_Speed_Colour();
 }
 
 void Nav_Screen_Set_Bump(uint32_t metres)

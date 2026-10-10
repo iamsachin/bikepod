@@ -21,7 +21,7 @@ LV_FONT_DECLARE(font_title_44);
 LV_FONT_DECLARE(font_text_32);
 LV_FONT_DECLARE(font_small_26);
 LV_FONT_DECLARE(font_media_40);
-LV_FONT_DECLARE(font_media_22);
+LV_FONT_DECLARE(font_playing_28);
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
@@ -32,7 +32,7 @@ LV_FONT_DECLARE(font_media_22);
 #define ICON_PLAY       "\xEE\x80\xB7"      // U+E037
 #define ICON_NEXT       "\xEE\x81\x84"      // U+E044
 #define ICON_PREVIOUS   "\xEE\x81\x85"      // U+E045
-#define ICON_NOTE       "\xEE\x90\x85"      // U+E405
+#define ICON_PLAYING    "\xEE\x86\xB8"      // U+E1B8 sound bars
 
 static lv_obj_t *call_root, *call_name;
 static lv_obj_t *music_root, *music_top, *music_title, *music_artist, *music_none;
@@ -385,7 +385,7 @@ void Music_Screen_Show(bool show)
 }
 
 /************************************ Updates ************************************/
-// While music plays: a small note at the bottom of the other pages; tap it for Now playing
+// While music plays: small sound bars at the top of the other pages; tap it for Now playing
 static lv_obj_t *note_btn;
 
 static void Note_Click(lv_event_t *e)
@@ -395,20 +395,13 @@ static void Note_Click(lv_event_t *e)
 
 static void Note_Create(void)
 {
-  note_btn = lv_btn_create(lv_layer_top());     // created before the call overlay, so it sits under it
-  lv_obj_remove_style_all(note_btn);
-  lv_obj_set_size(note_btn, 32, 32);
-  lv_obj_set_style_radius(note_btn, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(note_btn, COLOR_BLUE, 0);
-  lv_obj_set_style_bg_opa(note_btn, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(note_btn, lv_color_hex(0x2C5CC0), LV_STATE_PRESSED);
-  lv_obj_set_ext_click_area(note_btn, 16);       // easier to hit with gloves
-  lv_obj_align(note_btn, LV_ALIGN_TOP_MID, 0, 442);
-  lv_obj_t *icon = lv_label_create(note_btn);
-  lv_obj_set_style_text_font(icon, &font_media_22, 0);
-  lv_obj_set_style_text_color(icon, lv_color_white(), 0);
-  lv_label_set_text(icon, ICON_NOTE);
-  lv_obj_center(icon);
+  note_btn = lv_label_create(lv_layer_top());   // created before the call overlay, so it sits under it
+  lv_obj_set_style_text_font(note_btn, &font_playing_28, 0);
+  lv_obj_set_style_text_color(note_btn, COLOR_BLUE, 0);
+  lv_label_set_text(note_btn, ICON_PLAYING);
+  lv_obj_align(note_btn, LV_ALIGN_TOP_MID, 0, 56);   // between the rim and each page's first line
+  lv_obj_add_flag(note_btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(note_btn, 20);       // easier to hit with gloves
   lv_obj_add_event_cb(note_btn, Note_Click, LV_EVENT_CLICKED, NULL);
   lv_obj_add_flag(note_btn, LV_OBJ_FLAG_HIDDEN);
 }
