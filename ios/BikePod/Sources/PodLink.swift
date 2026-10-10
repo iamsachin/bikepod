@@ -22,6 +22,11 @@ enum TurnDir: String, CaseIterable, Identifiable {
 final class PodLink: NSObject {
     static let serviceUUID = CBUUID(string: "a30be272-f18f-4629-b9d2-b4dc872e5d05")
     static let navCharUUID = CBUUID(string: "50632787-1b5b-4788-a4ee-8ff5dc145962")
+    /// Pod -> phone lines (notifications), e.g. NOWPLAYING|7|title|artist
+    static let eventCharUUID = CBUUID(string: "6e0a3a5c-6f2b-4c1d-9c9a-2b6c5d7e8f10")
+
+    /// Called (on the main queue) with each line the pod sends
+    @ObservationIgnored var onEvent: ((String) -> Void)?
 
     enum State: String {
         case bluetoothOff = "Bluetooth is off"
@@ -170,13 +175,22 @@ extension PodLink: CBPeripheralDelegate {
         pump()
     }
 
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
+              let line = String(data: data, encoding: .utf8) else { return }
+        onEvent?(line)
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else { return }
-        peripheral.discoverCharacteristics([Self.navCharUUID], for: service)
+        peripheral.discoverCharacteristics([Self.navCharUUID, Self.eventCharUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         navChar = service.characteristics?.first(where: { $0.uuid == Self.navCharUUID })
+        if let events = service.characteristics?.first(where: { $0.uuid == Self.eventCharUUID }) {
+            peripheral.setNotifyValue(true, for: events)
+        }
         if navChar != nil {
             connectionID += 1
             connectedAt = Date()

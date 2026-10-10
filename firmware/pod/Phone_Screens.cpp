@@ -12,6 +12,9 @@
 #include "Pages.h"
 #include "Clock.h"
 #include "Map_Layer.h"
+#include "BLE_Link.h"
+#include <mbedtls/base64.h>
+#include <esp_heap_caps.h>
 
 LV_FONT_DECLARE(font_title_44);
 LV_FONT_DECLARE(font_text_32);
@@ -94,6 +97,97 @@ static lv_obj_t *Control(lv_obj_t *row, const char *icon, bool main, Media_Comma
   return label;
 }
 
+/*********************************** Album art ***********************************
+ * The phone looks the cover up from the song's title and artist (iOS doesn't share artwork)
+ * and sends it as 120x120 RGB565 in base64 parts. Drawn 2x behind the page, darkened so the
+ * text stays readable and fading to black towards the round screen's edge.
+ **********************************************************************************/
+#define ART_SIZE        120
+#define ART_PART        360                          // raw bytes per ART line
+#define ART_PARTS       (ART_SIZE * ART_SIZE * 2 / ART_PART)
+#define ART_SHOWN       240                          // drawn at twice the size
+
+static uint8_t *art_raw;                             // PSRAM, filled by the Bluetooth task
+static uint8_t art_have[(ART_PARTS + 7) / 8];
+static volatile uint16_t art_id = 0;                 // the song we want a cover for
+static volatile uint16_t art_complete = 0;           // the song whose cover has fully arrived
+static uint16_t art_drawn = 0;
+static lv_obj_t *art_canvas;
+
+void Album_Art_Line(const char *line)
+{
+  // ART|id|part|parts|base64
+  unsigned id, part, parts;
+  if (sscanf(line, "ART|%u|%u|%u|", &id, &part, &parts) != 3 || !art_raw) return;
+  if (id != art_id || parts != ART_PARTS || part >= ART_PARTS) return;
+  const char *b64 = line;
+  for (int i = 0; i < 4 && b64; i++) { b64 = strchr(b64, '|'); if (b64) b64++; }
+  if (!b64) return;
+  if (part == 0) memset(art_have, 0, sizeof(art_have));
+  size_t out_len = 0;
+  if (mbedtls_base64_decode(art_raw + part * ART_PART, ART_PART, &out_len, (const unsigned char *)b64, strlen(b64)) != 0) return;
+  art_have[part / 8] |= 1 << (part % 8);
+  for (int i = 0; i < ART_PARTS; i++) if (!(art_have[i / 8] & (1 << (i % 8)))) return;
+  art_complete = id;
+}
+
+static inline uint16_t Art_Px(int x, int y)
+{
+  x = LV_CLAMP(0, x, ART_SIZE - 1);
+  y = LV_CLAMP(0, y, ART_SIZE - 1);
+  const uint8_t *p = art_raw + (y * ART_SIZE + x) * 2;
+  return p[0] | p[1] << 8;
+}
+
+// Enlarged with smoothing, darkened, and faded to black outside a circle
+static void Art_Draw(void)
+{
+  const float brightness = 0.45f, r_full = 66, r_zero = 118;
+  for (int y = 0; y < ART_SHOWN; y++) {
+    for (int x = 0; x < ART_SHOWN; x++) {
+      float u = (x + 0.5f) / 2 - 0.5f, v = (y + 0.5f) / 2 - 0.5f;
+      int x0 = (int)floorf(u), y0 = (int)floorf(v);
+      float fx = u - x0, fy = v - y0;
+      float rgb[3] = { 0, 0, 0 };
+      const int dx[4] = { 0, 1, 0, 1 }, dy[4] = { 0, 0, 1, 1 };
+      const float w[4] = { (1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy };
+      for (int k = 0; k < 4; k++) {
+        uint16_t c = Art_Px(x0 + dx[k], y0 + dy[k]);
+        rgb[0] += w[k] * ((c >> 11) & 0x1F) / 31.0f;
+        rgb[1] += w[k] * ((c >> 5) & 0x3F) / 63.0f;
+        rgb[2] += w[k] * (c & 0x1F) / 31.0f;
+      }
+      float d = sqrtf((x + 0.5f - ART_SHOWN / 2) * (x + 0.5f - ART_SHOWN / 2) + (y + 0.5f - ART_SHOWN / 2) * (y + 0.5f - ART_SHOWN / 2));
+      float t = LV_CLAMP(0.0f, (d - r_full) / (r_zero - r_full), 1.0f);
+      float k = brightness * (1 - t * t * (3 - 2 * t));
+      lv_color_t col = lv_color_make((uint8_t)(rgb[0] * k * 255), (uint8_t)(rgb[1] * k * 255), (uint8_t)(rgb[2] * k * 255));
+      lv_canvas_set_px_color(art_canvas, x, y, col);
+    }
+  }
+  lv_obj_clear_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_invalidate(art_canvas);
+}
+
+static void Art_Create(lv_obj_t *parent)
+{
+  art_raw = (uint8_t *)heap_caps_malloc(ART_SIZE * ART_SIZE * 2, MALLOC_CAP_SPIRAM);
+  void *buf = heap_caps_malloc(LV_CANVAS_BUF_SIZE_TRUE_COLOR(ART_SHOWN, ART_SHOWN), MALLOC_CAP_SPIRAM);
+  art_canvas = lv_canvas_create(parent);
+  lv_canvas_set_buffer(art_canvas, buf, ART_SHOWN, ART_SHOWN, LV_IMG_CF_TRUE_COLOR);
+  lv_obj_align(art_canvas, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_add_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
+}
+
+// The song changed: ask the app for its cover
+static void Art_Request(const Phone_State &s)
+{
+  art_id = art_id % 60000 + 1;
+  lv_obj_add_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
+  char line[160];
+  snprintf(line, sizeof(line), "NOWPLAYING|%u|%s|%s", art_id, s.title, s.artist);
+  BLE_Link_Notify(line);
+}
+
 /********************************* Incoming call *********************************/
 static void Call_Create(void)
 {
@@ -143,6 +237,7 @@ static void Music_Create(lv_obj_t *parent)
   music_root = Box(parent, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_bg_color(music_root, lv_color_black(), 0);
   lv_obj_set_style_bg_opa(music_root, LV_OPA_COVER, 0);
+  Art_Create(music_root);                           // first: behind everything else
 
   music_top = Label(music_root, &font_small_26, COLOR_GREY);
   lv_obj_align(music_top, LV_ALIGN_TOP_MID, 0, 92);
@@ -264,6 +359,29 @@ static void Tick(lv_timer_t *timer)
     Map_Layer_Set_Visible(Pages_Nav_Visible());
   }
   if (ringing) Set_Text(call_name, s.caller[0] ? s.caller : "Unknown caller");
+
+  // Album art: ask for it when the song changes (again after 15 s if nothing came), draw it when complete
+  static char last_song[112] = "";
+  static uint32_t asked_ms = 0;
+  static uint8_t asks = 0;
+  char song[112];
+  snprintf(song, sizeof(song), "%s|%s", s.title, s.artist);
+  if (s.title[0] && strcmp(song, last_song) != 0) {
+    strlcpy(last_song, song, sizeof(last_song));
+    Art_Request(s);
+    asked_ms = millis();
+    asks = 1;
+  } else if (s.title[0] && art_complete != art_id && asks < 3 && millis() - asked_ms > 15000) {
+    art_id--;                                        // same song: ask again under the same id
+    Art_Request(s);
+    asked_ms = millis();
+    asks++;
+  }
+  if (art_complete == art_id && art_drawn != art_id) {
+    art_drawn = art_id;
+    Art_Draw();
+  }
+  if (!s.title[0]) lv_obj_add_flag(art_canvas, LV_OBJ_FLAG_HIDDEN);
 
   // The music page: the clock and position tick every second, the rest on changes
   if (music_visible) {

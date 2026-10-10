@@ -19,6 +19,7 @@
 		748DDE20759856ED1D0651C3 /* MapLibreSwiftDSL in Frameworks */ = {isa = PBXBuildFile; productRef = BCEA80ACEED0F99BD269DD2B /* MapLibreSwiftDSL */; };
 		7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8CBCE9D6044DF1591B825BE0 /* FerrostarCore */; };
 		89BCBD750A12B4F9B4086B6D /* PathShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16B1117B4E5FF5B1D498373 /* PathShape.swift */; };
+		9521D3ACF80892BE3342B182 /* AlbumArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242CE5D8FB798EE0305B1BD2 /* AlbumArt.swift */; };
 		986E97582A2FA574DDA76FD3 /* MapArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C76E28EF65BA10A60CC07C /* MapArea.swift */; };
 		9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BF76FF181C22E9399ED1D6 /* Navigator.swift */; };
 		9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B8E3DEB099F516B18C47F /* VectorTile.swift */; };
@@ -36,6 +37,7 @@
 		17D47BD68CE41B64E0D79683 /* MapFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapFeed.swift; sourceTree = "<group>"; };
 		18C967811A9A21CAD1C811A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		221E8EB08715D6EDAC24B568 /* PodLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodLink.swift; sourceTree = "<group>"; };
+		242CE5D8FB798EE0305B1BD2 /* AlbumArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArt.swift; sourceTree = "<group>"; };
 		3314AE08E78E36AB0935AEF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		44C76E28EF65BA10A60CC07C /* MapArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapArea.swift; sourceTree = "<group>"; };
 		4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BikePod.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -72,6 +74,7 @@
 		65B9604A02D2F70EA1F1DE32 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				242CE5D8FB798EE0305B1BD2 /* AlbumArt.swift */,
 				93925A49563DA8E4074636DC /* BikePodApp.swift */,
 				98D798DFA7D8BBE18163179F /* ContentView.swift */,
 				98369CA1E6068DD5C6A845FE /* DebugLog.swift */,
@@ -200,6 +203,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9521D3ACF80892BE3342B182 /* AlbumArt.swift in Sources */,
 				B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */,
 				D6FF766FDECA59CA9A7D5041 /* ContentView.swift in Sources */,
 				FD0853F747217638E55A673C /* DebugLog.swift in Sources */,

@@ -27,6 +27,11 @@
 #define POD_BLE_NAME          "BikePod"
 #define POD_SERVICE_UUID      "a30be272-f18f-4629-b9d2-b4dc872e5d05"
 #define POD_NAV_CHAR_UUID     "50632787-1b5b-4788-a4ee-8ff5dc145962"
+// Pod -> phone: notifications the app subscribes to, one UTF-8 line each:
+//   NOWPLAYING|7|Tum Hi Ho|Arijit Singh   the song changed (id 7): the app looks up its cover
+// Phone -> pod, in reply (on the Nav characteristic):
+//   ART|7|0|80|<base64>       part 0 of 80 of song 7's cover: 120x120 RGB565, 360 bytes a part
+#define POD_EVENT_CHAR_UUID   "6e0a3a5c-6f2b-4c1d-9c9a-2b6c5d7e8f10"
 
 #define NAV_PATH_MAX_POINTS   40
 
@@ -68,3 +73,5 @@ void BLE_Link_Inject(const String &line);
 void BLE_Link_End_Test(void);
 // Takes the oldest waiting message; returns false when there is none
 bool BLE_Link_Take_Message(Nav_Message *msg);
+// Sends a line to the phone app (if it's listening)
+void BLE_Link_Notify(const char *line);

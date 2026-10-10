@@ -12,6 +12,8 @@
 #include "Screenshot.h"
 #include "Map_Layer.h"
 #include "Phone_Notify.h"
+#include <BLE2902.h>
+#include "Phone_Screens.h"
 
 // Log lines would cut into screenshot data on the same serial port
 #define LOG(...) do { if (!screenshot_sending) printf(__VA_ARGS__); } while (0)
@@ -24,6 +26,7 @@ static uint8_t queue_head = 0;     // next to take
 static uint8_t queue_count = 0;
 static volatile bool connected = false;
 static volatile bool testing = false;    // lines come from the Mac over serial, not the phone
+static BLECharacteristic *events = NULL; // pod -> phone
 
 // Returns the text between the n-th and (n+1)-th '|' (n = 0 is the first field)
 static String Field(const String &text, int n)
@@ -219,6 +222,7 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
 static void Handle_Line(const String &text)
 {
   if (Handle_Map_Line(text)) return;
+  if (text.startsWith("ART|")) { Album_Art_Line(text.c_str()); return; }
   Nav_Message msg;
   if (!Parse_Message(text, &msg)) {
     LOG("BLE: ignored \"%s\"\r\n", text.c_str());
@@ -286,6 +290,9 @@ void BLE_Link_Init(void)
   label->setDescription("Nav");
   nav->addDescriptor(label);
 
+  events = service->createCharacteristic(POD_EVENT_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  events->addDescriptor(new BLE2902());    // lets the app subscribe
+
   service->start();
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(POD_SERVICE_UUID);
@@ -297,6 +304,13 @@ void BLE_Link_Init(void)
 bool BLE_Link_Connected(void)
 {
   return connected || testing;
+}
+
+void BLE_Link_Notify(const char *line)
+{
+  if (!events || !connected) return;
+  events->setValue((uint8_t *)line, strlen(line));
+  events->notify();
 }
 
 bool BLE_Link_Take_Message(Nav_Message *msg)
