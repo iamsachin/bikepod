@@ -40,6 +40,7 @@ final class PodLink: NSObject {
     private var central: CBCentralManager!
     private var pod: CBPeripheral?
     private var navChar: CBCharacteristic?
+    private var recheck: Timer?
 
     override init() {
         super.init()
@@ -106,7 +107,31 @@ final class PodLink: NSObject {
 
     private func startScan() {
         state = .scanning
+        // Once paired, iOS keeps its own connection to the pod (for calls and music), and the pod
+        // stops advertising while connected: so look for a pod iOS is already connected to first
+        if let connected = central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID]).first {
+            use(connected)
+            return
+        }
         central.scanForPeripherals(withServices: [Self.serviceUUID])
+        // iOS may connect to the pod while we scan (it reconnects paired accessories itself):
+        // keep checking for that too
+        recheck?.invalidate()
+        recheck = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
+            guard let self, self.state == .scanning else { timer.invalidate(); return }
+            if let connected = self.central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID]).first {
+                timer.invalidate()
+                self.use(connected)
+            }
+        }
+    }
+
+    private func use(_ peripheral: CBPeripheral) {
+        central.stopScan()
+        pod = peripheral
+        peripheral.delegate = self
+        state = .connecting
+        central.connect(peripheral)          // already connected: this just opens it for this app
     }
 }
 
@@ -121,11 +146,7 @@ extension PodLink: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        central.stopScan()
-        pod = peripheral
-        peripheral.delegate = self
-        state = .connecting
-        central.connect(peripheral)
+        use(peripheral)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
