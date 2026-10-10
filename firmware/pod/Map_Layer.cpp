@@ -26,11 +26,11 @@
 #define ROUTE_MAX       256       // route points after its corners are rounded
 
 #define FRAME_MS        20        // camera update / redraw rate (~50 fps when moving)
-#define CAM_SETTLE_S    0.35f     // how quickly a correction from a new pose fades out
+#define CAM_SETTLE_S    0.25f     // how quickly a correction from a new pose fades out (see Update_Camera)
 #define ZOOM_EASE_S     0.6f      // how quickly the zoom follows its target
 #define PREDICT_MAX_S   1.5f      // stop predicting if poses stop coming
 #define ROUTE_BEND_M    12.0f     // radius of the route's rounded corners, metres
-#define PREDICT_SPEED   0.9f      // predict a little slower than measured (riders slow into turns)
+#define PREDICT_SPEED   0.95f     // predict a little slower than measured (riders slow into turns)
 #define HOLD_BACK_DEG   8.0f      // in a turn, smaller corrections against it wait instead
 
 struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; int16_t cx, cy, radius; };
@@ -133,7 +133,9 @@ static float off_x, off_y, off_h;   // correction left over from the last pose, 
 static uint32_t off_at;
 static float turn_dir = 0;          // which way the camera has been rotating (+ clockwise)
 static uint32_t cam_at = 0;
-static float zoom = 0, zoom_target = 0;
+static float zoom = 0, zoom_target = 0, zoom_mid = 0;   // zoom eases to zoom_mid, which eases to the target
+static float turn_dist = -1;        // metres to the next turn at turn_at
+static uint32_t turn_at;
 static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
 
 // Route, north-up metres relative to its origin, corners already rounded
@@ -286,7 +288,10 @@ static void Update_Camera(uint32_t now)
   if (!pose_ok) return;
   float px, py, ph;
   Predict(now, &px, &py, &ph);
-  float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
+  // Critically damped: the correction starts fading at zero speed (a plain exponential started
+  // at full speed, a small push with every pose that showed as a jump when zoomed in at turns)
+  float t = (uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S;
+  float fade = (1 + t) * expf(-t);
   cam_x = px + off_x * fade;
   cam_y = py + off_y * fade;
   // On the route, the arrow stays on the line: a fading correction slides straight, which cut
@@ -320,7 +325,10 @@ void Map_Layer_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)
 {
   uint32_t now = lv_tick_get();
   bool was_drawn = pose_ok && drawn_x < 1e8;
-  float before_x = cam_x, before_y = cam_y, before_h = cam_h;   // camera as currently shown
+  // Camera as it should be shown right now (not as of the last frame, up to ~100 ms ago: that
+  // made the map stall and then surge with every pose, very visible zoomed in near turns)
+  if (was_drawn) Update_Camera(now);
+  float before_x = cam_x, before_y = cam_y, before_h = cam_h;
 
   Pose p = last_pose;
   float px, py;
@@ -368,10 +376,17 @@ void Map_Layer_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)
   Update_Camera(now);
 }
 
-void Map_Layer_Set_Target_Scale(float pixels_per_metre)
+void Map_Layer_Set_Turn_Distance(float metres)
 {
-  zoom_target = pixels_per_metre;
-  if (zoom == 0) zoom = pixels_per_metre;
+  turn_dist = metres;
+  turn_at = lv_tick_get();
+}
+
+// Zoom so the turn sits about 78 px ahead of the rider (room above it for the road beyond); not
+// further out than 0.55 px/m, or the map area would end on screen
+static float Zoom_For(float metres)
+{
+  return LV_CLAMP(0.55f, 78.0f / LV_MAX(metres, 30.0f), 2.6f);
 }
 
 bool Map_Layer_Has_Map(void)
@@ -832,6 +847,8 @@ void Map_Layer_Poll(void)
   }
 }
 
+bool map_cam_log = false;   // serial "camlog": print every new map frame's camera
+
 // Every frame: move the camera and zoom, and redraw only if the picture actually changes
 static void Frame(lv_timer_t *timer)
 {
@@ -839,13 +856,25 @@ static void Frame(lv_timer_t *timer)
   uint32_t now = lv_tick_get();
   float dt = last ? (uint32_t)(now - last) / 1000.0f : 0;
   last = now;
-  if (zoom_target > 0) zoom += (zoom_target - zoom) * (1 - expf(-dt / ZOOM_EASE_S));
+  if (turn_dist >= 0) {
+    // Distance to the turn now, counting down at the rider's speed since the last update
+    float coast = fminf((uint32_t)(now - turn_at) / 1000.0f, PREDICT_MAX_S);
+    zoom_target = Zoom_For(turn_dist - last_pose.speed * coast);
+    if (zoom == 0) zoom = zoom_mid = zoom_target;
+  }
+  if (zoom_target > 0) {
+    // Two easing stages: the zoom speeds up and slows down gently instead of lurching
+    float k = 1 - expf(-dt / (ZOOM_EASE_S / 2));
+    zoom_mid += (zoom_target - zoom_mid) * k;
+    zoom += (zoom_mid - zoom) * k;
+  }
   if (!pose_ok || !layer) return;
   Update_Camera(now);
   float moved_px = sqrtf((cam_x - drawn_x) * (cam_x - drawn_x) + (cam_y - drawn_y) * (cam_y - drawn_y)) * zoom;
   if (moved_px > 0.3f || fabsf(cam_h - drawn_h) > 0.15f || fabsf(zoom - drawn_zoom) > 0.002f * zoom) {
     drawn_x = cam_x; drawn_y = cam_y; drawn_h = cam_h; drawn_zoom = zoom;
     lv_obj_invalidate(layer);
+    if (map_cam_log) printf("F %lu %.2f %.2f %.2f %.3f\r\n", (unsigned long)now, cam_x, cam_y, cam_h, zoom);
   }
 }
 

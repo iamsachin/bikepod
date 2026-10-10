@@ -615,9 +615,7 @@ void Nav_Screen_Update(Turn_Dir dir, uint32_t distance_m, uint16_t progress, con
     Ring_Set_Fixed(0);   // a fresh approach after another screen
   }
   turn_distance_m = distance_m;
-  // Zoom so the turn sits about 78 px ahead of the rider (room above it for the road beyond);
-  // not further out than 0.55 px/m, or the map area would end on screen. The map eases to it.
-  Map_Layer_Set_Target_Scale(LV_CLAMP(0.55f, 78.0f / LV_MAX((float)distance_m, 30.0f), 2.6f));
+  Map_Layer_Set_Turn_Distance(distance_m);   // the map zooms in as the turn gets closer
 
   switch (dir) {
     case TURN_LEFT:
