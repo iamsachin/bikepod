@@ -24,7 +24,7 @@ static const uint8_t BRIGHTNESS[4] = { 25, 50, 75, 100 };
 static const char *BRIGHTNESS_NAME[4] = { "Low", "Mid", "High", "Max" };
 
 static Preferences prefs;
-static bool clock_24h = true;
+static bool clock_24h = false;               // 12 h unless changed
 static uint8_t brightness_step = 3;
 
 static lv_obj_t *panel;
@@ -35,7 +35,7 @@ static bool panel_open = false;
 void Settings_Init(void)
 {
   prefs.begin("pod", false);
-  clock_24h = prefs.getBool("clock24", true);
+  clock_24h = prefs.getBool("clock24", false);
   brightness_step = LV_MIN(prefs.getUChar("bright", 3), 3);
   Set_Backlight(BRIGHTNESS[brightness_step]);
 }
