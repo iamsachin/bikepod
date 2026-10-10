@@ -18,9 +18,9 @@ void Pages_Show(int new_page)
 {
   if (new_page < 0 || new_page >= PAGE_COUNT || new_page == page) return;
   page = new_page;
-  Music_Screen_Show(page == 1);
+  Lean_Screen_Show(page == 1);
   Journey_Screen_Show(page == 2);
-  Lean_Screen_Show(page == 3);
+  Music_Screen_Show(page == 3);
   Map_Layer_Set_Visible(page == 0);
 }
 
@@ -42,8 +42,10 @@ static void Gesture_Cb(lv_event_t *e)
     if (dir == LV_DIR_TOP) Settings_Panel_Show(false);
     return;
   }
-  if (dir == LV_DIR_RIGHT) Pages_Show(page + 1);
-  else if (dir == LV_DIR_LEFT) Pages_Show(page - 1);
+  // Like a phone: swipe left for the next page (the dots show it to the right), right to go back
+  // ...and round in a circle: past the last page comes navigation again
+  if (dir == LV_DIR_LEFT) Pages_Show((page + 1) % PAGE_COUNT);
+  else if (dir == LV_DIR_RIGHT) Pages_Show((page + PAGE_COUNT - 1) % PAGE_COUNT);
   else if (dir == LV_DIR_BOTTOM) Settings_Panel_Show(true);
 }
 

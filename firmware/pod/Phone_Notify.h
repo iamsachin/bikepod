@@ -27,6 +27,10 @@ void Phone_Notify_Init(void);                                  // security setti
 void Phone_Notify_Connected(const esp_bd_addr_t remote);
 void Phone_Notify_Disconnected(void);
 
+// Music controls (AMS remote commands)
+enum Media_Command { MEDIA_TOGGLE = 2, MEDIA_NEXT = 3, MEDIA_PREVIOUS = 4 };
+void Phone_Notify_Media_Command(Media_Command command);
+
 // Testing without a phone (serial "fakecall" / "fakemusic")
 void Phone_Notify_Fake_Call(const char *name);               // "" = call over
 void Phone_Notify_Fake_Music(const char *title, const char *artist, bool playing);

@@ -25,10 +25,13 @@ LV_FONT_DECLARE(font_media_40);
 #define ICON_CALL       "\xEE\x82\xB0"      // U+E0B0
 #define ICON_PAUSE      "\xEE\x80\xB4"      // U+E034
 #define ICON_PLAY       "\xEE\x80\xB7"      // U+E037
+#define ICON_NEXT       "\xEE\x81\x84"      // U+E044
+#define ICON_PREVIOUS   "\xEE\x81\x85"      // U+E045
 
 static lv_obj_t *call_root, *call_name;
 static lv_obj_t *music_root, *music_top, *music_title, *music_artist, *music_none;
-static lv_obj_t *music_row, *music_elapsed, *music_icon, *music_left;
+static lv_obj_t *music_row, *music_elapsed, *music_bar, *music_fill, *music_left;
+static lv_obj_t *music_controls, *music_icon;
 static bool music_visible = false;
 static uint32_t shown_version = 0xFFFFFFFF;
 static int speed_kmh = -1;
@@ -67,6 +70,28 @@ static void Format_Time(char *out, size_t size, float seconds)
 {
   int s = (int)LV_MAX(seconds, 0.0f);
   snprintf(out, size, "%d:%02d", s / 60, s % 60);
+}
+
+static void Control_Cb(lv_event_t *e)
+{
+  Phone_Notify_Media_Command((Media_Command)(intptr_t)lv_event_get_user_data(e));
+}
+
+// A round button with an icon; returns the icon label. The middle one is filled blue.
+static lv_obj_t *Control(lv_obj_t *row, const char *icon, bool main, Media_Command command)
+{
+  lv_coord_t size = main ? 76 : 64;
+  lv_obj_t *btn = Box(row, size, size);
+  lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(btn, main ? COLOR_BLUE : lv_color_hex(0x1E1E1E), 0);
+  lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(btn, main ? lv_color_hex(0x2C5CC0) : lv_color_hex(0x333333), LV_STATE_PRESSED);
+  lv_obj_add_event_cb(btn, Control_Cb, LV_EVENT_CLICKED, (void *)(intptr_t)command);
+  lv_obj_t *label = Label(btn, &font_media_40, lv_color_white());
+  lv_label_set_text(label, icon);
+  lv_obj_center(label);
+  return label;
 }
 
 /********************************* Incoming call *********************************/
@@ -127,7 +152,7 @@ static void Music_Create(lv_obj_t *parent)
   lv_obj_set_flex_flow(middle, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(middle, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(middle, 6, 0);
-  lv_obj_align(middle, LV_ALIGN_CENTER, 0, -14);
+  lv_obj_align(middle, LV_ALIGN_CENTER, 0, -42);
   music_title = Label(middle, &font_title_44, lv_color_white());
   lv_obj_set_width(music_title, 380);
   lv_label_set_long_mode(music_title, LV_LABEL_LONG_WRAP);
@@ -136,21 +161,37 @@ static void Music_Create(lv_obj_t *parent)
   lv_obj_set_width(music_artist, 360);
   lv_label_set_long_mode(music_artist, LV_LABEL_LONG_DOT);
 
-  // 1:14  ❚❚  -2:52
+  // 1:14 ━━━━━── -2:52
   music_row = Box(music_root, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(music_row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(music_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(music_row, 18, 0);
-  lv_obj_align(music_row, LV_ALIGN_TOP_MID, 0, 330);
+  lv_obj_set_style_pad_column(music_row, 12, 0);
+  lv_obj_align(music_row, LV_ALIGN_TOP_MID, 0, 296);
   music_elapsed = Label(music_row, &font_small_26, COLOR_GREY);
-  music_icon = Label(music_row, &font_media_40, COLOR_BLUE);
+  music_bar = Box(music_row, 150, 4);
+  lv_obj_set_style_radius(music_bar, 2, 0);
+  lv_obj_set_style_bg_color(music_bar, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_bg_opa(music_bar, LV_OPA_COVER, 0);
+  music_fill = Box(music_bar, 0, 4);
+  lv_obj_set_style_radius(music_fill, 2, 0);
+  lv_obj_set_style_bg_color(music_fill, COLOR_BLUE, 0);
+  lv_obj_set_style_bg_opa(music_fill, LV_OPA_COVER, 0);
   music_left = Label(music_row, &font_small_26, COLOR_DIM);
+
+  // ⏮  ⏯  ⏭  (big targets for gloves)
+  music_controls = Box(music_root, 280, 76);
+  lv_obj_set_flex_flow(music_controls, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(music_controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(music_controls, LV_ALIGN_TOP_MID, 0, 338);
+  Control(music_controls, ICON_PREVIOUS, false, MEDIA_PREVIOUS);
+  music_icon = Control(music_controls, ICON_PAUSE, true, MEDIA_TOGGLE);
+  Control(music_controls, ICON_NEXT, false, MEDIA_NEXT);
 
   music_none = Label(music_root, &font_text_32, COLOR_DIM);
   lv_label_set_text(music_none, "Nothing playing");
   lv_obj_center(music_none);
 
-  Pages_Add_Dots(music_root, 1);
+  Pages_Add_Dots(music_root, 3);
   lv_obj_add_flag(music_root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -174,6 +215,7 @@ static void Music_Refresh(const Phone_State &s)
   Show_If(music_title, have);
   Show_If(music_artist, have);
   Show_If(music_row, have);
+  Show_If(music_controls, have);
   if (!have) return;
   // Film songs often come as "Tum Hi Ho (From \"Aashiqui 2\") - Unplugged Version": keep the name
   char title[64];
@@ -197,6 +239,8 @@ static void Music_Refresh(const Phone_State &s)
     text[0] = 0;
   }
   Set_Text(music_left, text);
+  lv_coord_t fill = s.duration_s > 0 ? (lv_coord_t)(150 * LV_CLAMP(0.0f, elapsed / s.duration_s, 1.0f)) : 0;
+  if (lv_obj_get_width(music_fill) != fill) lv_obj_set_width(music_fill, fill);
   Set_Text(music_icon, s.media_playing ? ICON_PAUSE : ICON_PLAY);
 }
 

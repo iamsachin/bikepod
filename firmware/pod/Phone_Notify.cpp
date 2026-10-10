@@ -26,6 +26,8 @@ static BLEUUID ANCS_CONTROL_POINT("69D1D8F3-45E1-49A8-9821-9BBDFDAAD9D9");
 static BLEUUID ANCS_DATA_SOURCE("22EAC6E9-24D6-4BB5-BE44-B36ACE7C7BFB");
 static BLEUUID AMS_SERVICE("89D3502B-0F36-433A-8EF4-C502AD55F8DC");
 static BLEUUID AMS_ENTITY_UPDATE("2F7CABCE-808D-411F-9A0C-BB92BA96C102");
+static BLEUUID AMS_REMOTE_COMMAND("9B3C81D8-57B1-4A8A-B8DF-0E56F7CA51C2");
+#define REQUEST_COMMAND 0xFFFFFF00u           // queue items at or above this are media commands
 
 #define CATEGORY_INCOMING_CALL  1
 #define EVENT_ADDED             0
@@ -41,6 +43,7 @@ static volatile bool secured = false;         // ...and the link is encrypted (p
 static TaskHandle_t worker = NULL;
 static QueueHandle_t requests;                // notification UIDs to look up (callers)
 static BLERemoteCharacteristic *control_point = NULL;
+static BLERemoteCharacteristic *remote_command = NULL;
 static volatile uint32_t call_uid = 0xFFFFFFFF;
 
 static void Changed(void (*edit)(Phone_State &))
@@ -179,6 +182,7 @@ static void Worker(void *)
       }
       BLERemoteService *ams = client->getService(AMS_SERVICE);
       BLERemoteCharacteristic *eu = ams ? ams->getCharacteristic(AMS_ENTITY_UPDATE) : NULL;
+      remote_command = ams ? ams->getCharacteristic(AMS_REMOTE_COMMAND) : NULL;
       if (eu) {
         eu->registerForNotify(Entity_Update);
         uint8_t track[] = { 2, 0, 2, 3 };               // Track: Artist, Title, Duration
@@ -194,12 +198,18 @@ static void Worker(void *)
   // Look up callers' names while connected
   uint32_t uid;
   while (linked) {
-    if (xQueueReceive(requests, &uid, pdMS_TO_TICKS(500)) == pdTRUE && control_point) {
+    if (xQueueReceive(requests, &uid, pdMS_TO_TICKS(500)) != pdTRUE) continue;
+    if (uid >= REQUEST_COMMAND) {
+      uint8_t command = (uint8_t)(uid - REQUEST_COMMAND);
+      if (remote_command) remote_command->writeValue(&command, 1, true);
+      LOG("PHONE: media command %u\r\n", command);
+    } else if (control_point) {
       uint8_t cmd[] = { 0, (uint8_t)uid, (uint8_t)(uid >> 8), (uint8_t)(uid >> 16), (uint8_t)(uid >> 24), 1, 40, 0 };
       control_point->writeValue(cmd, sizeof(cmd), true);   // Title, up to 40 bytes
     }
   }
   control_point = NULL;
+  remote_command = NULL;
   worker = NULL;
   vTaskDelete(NULL);
 }
@@ -219,6 +229,12 @@ void Phone_Notify_Disconnected(void)
   secured = false;
   call_uid = 0xFFFFFFFF;
   Changed([](Phone_State &s) { s.call_ringing = false; s.media_playing = false; });
+}
+
+void Phone_Notify_Media_Command(Media_Command command)
+{
+  uint32_t item = REQUEST_COMMAND + command;
+  if (requests) xQueueSend(requests, &item, 0);
 }
 
 /************************************ Testing ************************************/
