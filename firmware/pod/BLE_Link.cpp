@@ -11,6 +11,7 @@
 #include <BLE2901.h>
 #include "Screenshot.h"
 #include "Map_Layer.h"
+#include "Phone_Notify.h"
 
 // Log lines would cut into screenshot data on the same serial port
 #define LOG(...) do { if (!screenshot_sending) printf(__VA_ARGS__); } while (0)
@@ -256,8 +257,12 @@ class Server_Callbacks : public BLEServerCallbacks {
     connected = true;
     LOG("BLE: phone connected\r\n");
   }
+  void onConnect(BLEServer *server, esp_ble_gatts_cb_param_t *param) override {
+    Phone_Notify_Connected(param->connect.remote_bda);   // calls and music from the phone
+  }
   void onDisconnect(BLEServer *server) override {
     connected = false;
+    Phone_Notify_Disconnected();
     LOG("BLE: phone disconnected, advertising again\r\n");
     BLEDevice::startAdvertising();
   }
@@ -267,6 +272,7 @@ void BLE_Link_Init(void)
 {
   BLEDevice::init(POD_BLE_NAME);
   BLEDevice::setMTU(517);                  // let the phone send a whole PATH line in one packet
+  Phone_Notify_Init();                     // pairing settings (for calls and music)
   BLEServer *server = BLEDevice::createServer();
   server->setCallbacks(new Server_Callbacks());
 

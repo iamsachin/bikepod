@@ -2,7 +2,7 @@
 
 #include <lvgl.h>
 
-// Screens you swipe between: 0 = navigation, 1 = journey, 2 = lean. Swipe right for the next
+// Screens you swipe between: 0 = navigation, 1 = music, 2 = journey, 3 = lean. Swipe right for the next
 // screen, left to go back.
 void Pages_Init(void);
 void Pages_Show(int page);

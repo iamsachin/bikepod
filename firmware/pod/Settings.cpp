@@ -180,7 +180,7 @@ void Settings_Panel_Show(bool show)
   if (show) lv_obj_clear_flag(panel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(panel);
   // The map underneath stops redrawing while it's covered
-  Map_Layer_Set_Visible(!show && Pages_Current() == 0);
+  Map_Layer_Set_Visible(Pages_Nav_Visible());
 
   lv_anim_t a;
   lv_anim_init(&a);

@@ -16,6 +16,7 @@
 #include "Journey_Screen.h"
 #include "Settings.h"
 #include "Clock.h"
+#include "Phone_Screens.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
 #define STALE_AFTER_MS  8000
@@ -58,7 +59,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TRIP:    Nav_Screen_Set_Trip(msg.clock, msg.km);
                         Journey_Set(msg.clock, msg.km, msg.km_total, msg.elapsed_s); break;
       case MSG_ROUTE:   Nav_Screen_Set_Route(msg.area_id, msg.path, msg.path_count); break;
-      case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); Nav_Screen_Set_Speed(msg.speed_mps); break;
+      case MSG_SPEED:   Lean_Set_Speed(msg.speed_mps); Nav_Screen_Set_Speed(msg.speed_mps); Music_Set_Speed(msg.speed_mps); break;
       case MSG_LIMIT:   Nav_Screen_Set_Limit(msg.speed_kmh); break;
       case MSG_BUMP:    Nav_Screen_Set_Bump(msg.distance_m); break;
       case MSG_TIME:    Clock_Set(msg.elapsed_s / 3600, msg.elapsed_s / 60 % 60, msg.elapsed_s % 60); break;
@@ -94,7 +95,8 @@ void setup()
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
-  Journey_Screen_Create(lv_scr_act());   // swipe right from navigation
+  Phone_Screens_Create(lv_scr_act());    // now playing (swipe right from navigation); incoming calls
+  Journey_Screen_Create(lv_scr_act());   // swipe right again
   Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
   Settings_Panel_Create(lv_scr_act());   // swipe down from the top
   Pages_Init();

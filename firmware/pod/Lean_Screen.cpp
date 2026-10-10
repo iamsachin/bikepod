@@ -375,7 +375,7 @@ void Lean_Screen_Create(lv_obj_t *parent)
   cal_label = Label(root, &font_small_26, COLOR_DIM);
   lv_obj_align(cal_label, LV_ALIGN_TOP_MID, 0, 392);
 
-  Pages_Add_Dots(root, 2);
+  Pages_Add_Dots(root, 3);
 
   lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 
