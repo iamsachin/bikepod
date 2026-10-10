@@ -52,7 +52,7 @@ final class Navigator {
     private let link: PodLink
     /// Created by activate(), after the first screen is up: setting it up asks the system for the
     /// location permission and waits for the answer, which held the whole UI at launch
-    @ObservationIgnored private var device: CoreLocationProvider?
+    @ObservationIgnored private var device: FreshLocationProvider?
     @ObservationIgnored private var gpsWatch: AnyCancellable?
     private let simulated = SimulatedLocationProvider()
     private var core: FerrostarCore?
@@ -88,7 +88,7 @@ final class Navigator {
     /// Starts following the phone's GPS (call once the first screen is showing)
     func activate() {
         guard device == nil else { return }
-        let device = CoreLocationProvider(activityType: .automotiveNavigation, allowBackgroundLocationUpdates: true)
+        let device = FreshLocationProvider(activityType: .automotiveNavigation, allowBackgroundLocationUpdates: true)
         device.startUpdating()   // also triggers the location permission prompt
         self.device = device
         gpsWatch = device.$lastLocation
