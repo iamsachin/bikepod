@@ -330,6 +330,14 @@ static void Update_Camera(uint32_t now)
 
 void Map_Layer_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)
 {
+  // A pose for an area whose reference hasn't arrived yet can't be placed: keep the last one
+  // (taking it lost the route-following prediction, and the arrow left the route at bends)
+  double ref_lat, ref_lng;
+  if (!Ref_Find(area_id, &ref_lat, &ref_lng)) {
+    static uint16_t logged = 0;
+    if (logged != area_id) printf("MAP: pose for area %u before its reference, kept the last\r\n", logged = area_id);
+    return;
+  }
   uint32_t now = lv_tick_get();
   bool was_drawn = pose_ok && drawn_x < 1e8;
   // Camera as it should be shown right now (not as of the last frame, up to ~100 ms ago: that
@@ -452,6 +460,8 @@ static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, flo
 
 void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
 {
+  double ref_lat, ref_lng;
+  if (!Ref_Find(area_id, &ref_lat, &ref_lng)) return;     // as for poses: keep the current route
   int16_t (*last)[2] = last_route_in;
   if (count > 48) count = 48;
   if (area_id == last_area && count == last_count && memcmp(last, pts, count * sizeof(last[0])) == 0) return;

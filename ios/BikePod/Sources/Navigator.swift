@@ -509,7 +509,10 @@ final class Navigator {
     /// A whole map area: ~100-250 lines, sent once per area (and again after a reconnect)
     private func sendMapArea(_ lines: [String]) {
         guard !podFeedPaused, link.state == .connected else { return }
-        for line in lines { link.send(line: line, priority: .bulk) }
+        // MAPBEGIN (the area's reference point) goes with the live lines: poses and the route switch
+        // to the new area's frame at once, and the pod can't place them without it. Queued in bulk
+        // behind them, it came late and the pod's arrow left the route at bends for a moment.
+        for (i, line) in lines.enumerated() { link.send(line: line, priority: i == 0 ? .live : .bulk) }
         mapSentForConnection = link.connectionID
     }
 
