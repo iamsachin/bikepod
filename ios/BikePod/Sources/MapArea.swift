@@ -85,7 +85,9 @@ enum MapArea {
         let p = frame.project(lat, lng)
         var h = headingDegrees.truncatingRemainder(dividingBy: 360)
         if h < 0 { h += 360 }
-        return "POSE|\(id)|\(Int(p.x.rounded())),\(Int(p.y.rounded())),\(Int(h.rounded()) % 360)"
+        // Tenths of a metre and of a degree: whole units made the map jump by up to half a metre
+        // or half a degree each update (1-2 px zoomed in), which looked like shaking
+        return "POSE|\(id)|\(Int((p.x * 10).rounded())),\(Int((p.y * 10).rounded())),\(Int((h * 10).rounded()) % 3600)"
     }
 
     /// Douglas-Peucker on metre points

@@ -26,7 +26,8 @@ enum PathShape {
     static func around(rider: GeographicCoordinate, route: [GeographicCoordinate],
                        metresToTurn: Double, previousAlong: Double? = nil, junctions: [Junction] = [])
         -> (shape: [(x: Int, y: Int)], stubs: [Stub], along: Double,
-            origin: (lat: Double, lng: Double), headingDegrees: Double)? {
+            origin: (lat: Double, lng: Double), headingDegrees: Double,
+            northUp: [(x: Double, y: Double)])? {
         guard route.count >= 2 else { return nil }
 
         // Flat local projection in metres around the rider (fine over a few hundred metres)
@@ -114,7 +115,12 @@ enum PathShape {
         stubs.sort { $0.distance < $1.distance }
         // Where the drawing's (0,0) is on Earth, and its heading: the map uses the same view
         let originLatLng = (lat: rider.lat + origin.y / metresPerDegLat, lng: rider.lng + origin.x / metresPerDegLng)
-        return (result, stubs.prefix(maxStubs).map(\.stub), s0, originLatLng, headingDegrees)
+        // The same shape north-up and unrounded (metres from the origin), for the pod's map:
+        // turning the rounded heading-up points back made the route wobble from update to update
+        let northUp = shape.filter { $0 != .zero }.map { p in
+            (x: p.x * cos(heading) + p.y * sin(heading), y: -p.x * sin(heading) + p.y * cos(heading))
+        }
+        return (result, stubs.prefix(maxStubs).map(\.stub), s0, originLatLng, headingDegrees, northUp)
     }
 
     /// Douglas-Peucker line simplification; keeps both end points.

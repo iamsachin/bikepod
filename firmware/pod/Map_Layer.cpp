@@ -11,6 +11,8 @@
   a new pose arrives, the difference between where the camera was and the new prediction is kept
   as an offset that fades out over CAM_SETTLE_S, so corrections never snap and there is no lag.
   Zoom eases towards its target the same way.
+  In a turn the map never rotates back: a guess that went slightly too far waits for the rider
+  instead of unwinding (that unwinding made the map rotate, slip back, rotate... through turns).
 ******************************************************************************/
 // This file's drawing loops run for every map pixel: compile it for speed, not size (Arduino's -Os)
 #pragma GCC optimize("O2")
@@ -27,7 +29,9 @@
 #define CAM_SETTLE_S    0.35f     // how quickly a correction from a new pose fades out
 #define ZOOM_EASE_S     0.6f      // how quickly the zoom follows its target
 #define PREDICT_MAX_S   1.5f      // stop predicting if poses stop coming
-#define ROUTE_BEND_PX   18.0f     // radius of the route's rounded corners on screen
+#define ROUTE_BEND_M    12.0f     // radius of the route's rounded corners, metres
+#define PREDICT_SPEED   0.9f      // predict a little slower than measured (riders slow into turns)
+#define HOLD_BACK_DEG   8.0f      // in a turn, smaller corrections against it wait instead
 
 struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; int16_t cx, cy, radius; };
 
@@ -111,6 +115,7 @@ struct Pose {
   uint16_t area;                // the area this pose was sent in
   float x, y, heading;          // metres (that area's frame), degrees clockwise from north
   float vx, vy, turn;           // metres/s and degrees/s, measured from successive poses
+  float speed;                  // metres/s used for prediction (the lower of smoothed and latest)
   uint32_t at;                  // ms
 };
 static Pose last_pose;
@@ -126,6 +131,8 @@ static bool has_route = false;
 static float cam_x, cam_y, cam_h;
 static float off_x, off_y, off_h;   // correction left over from the last pose, fading out
 static uint32_t off_at;
+static float turn_dir = 0;          // which way the camera has been rotating (+ clockwise)
+static uint32_t cam_at = 0;
 static float zoom = 0, zoom_target = 0;
 static float drawn_x = 1e9, drawn_y, drawn_h, drawn_zoom;
 
@@ -248,7 +255,7 @@ static void Predict(uint32_t now, float *x, float *y, float *h)
       if (d2 < best) { best = d2; s0 = route_along[i] + t * sqrtf(len2); }
     }
     if (best < 25.0f * 25.0f) {
-      float s = s0 + hypotf(last_pose.vx, last_pose.vy) * dt;
+      float s = s0 + last_pose.speed * dt;
       float rx, ry, ax, ay, bx, by;
       Route_Point(s, &rx, &ry);
       Route_Point(s - 4, &ax, &ay);           // direction of the route around that point
@@ -260,8 +267,9 @@ static void Predict(uint32_t now, float *x, float *y, float *h)
       return;
     }
   }
-  *x = pose_x + last_pose.vx * dt;
-  *y = pose_y + last_pose.vy * dt;
+  float k = PREDICT_SPEED;
+  *x = pose_x + last_pose.vx * k * dt;
+  *y = pose_y + last_pose.vy * k * dt;
   *h = last_pose.heading + last_pose.turn * dt;
 }
 
@@ -273,10 +281,22 @@ static void Update_Camera(uint32_t now)
   float fade = expf(-(float)(uint32_t)(now - off_at) / 1000.0f / CAM_SETTLE_S);
   cam_x = px + off_x * fade;
   cam_y = py + off_y * fade;
-  cam_h = ph + off_h * fade;
+
+  // Heading: follow the target, but don't turn back against the turn for a small correction
+  float dt = cam_at ? fminf((uint32_t)(now - cam_at) / 1000.0f, 0.2f) : 0;
+  cam_at = now;
+  float err = Wrap180(ph + off_h * fade - cam_h);
+  if (err * turn_dir < 0 && fabsf(err) < HOLD_BACK_DEG) err = 0;
+  float step = err * (1 - expf(-dt / 0.12f));
+  cam_h += step;
+  // Remember the turning direction (forgotten after about half a second of going straight)
+  float rate = dt > 0 ? step / dt : 0;
+  if (fabsf(rate) > 4) turn_dir = rate > 0 ? 1 : -1;
+  else turn_dir *= expf(-dt / 0.5f);
+  if (fabsf(turn_dir) < 0.2f) turn_dir = 0;
 }
 
-void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
+void Map_Layer_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)
 {
   uint32_t now = lv_tick_get();
   bool was_drawn = pose_ok && drawn_x < 1e8;
@@ -289,12 +309,14 @@ void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_
     float dt = (uint32_t)(now - p.at) / 1000.0f;
     if (dt > 0.05f && dt < 3) {
       float vx = (x - px) / dt, vy = (y - py) / dt;
+      float latest = hypotf(vx, vy);
       float turn = LV_CLAMP(-120.0f, Wrap180(heading_deg - p.heading) / dt, 120.0f);
       p.vx = 0.5f * p.vx + 0.5f * vx;
       p.vy = 0.5f * p.vy + 0.5f * vy;
       p.turn = 0.5f * p.turn + 0.5f * turn;
+      p.speed = PREDICT_SPEED * fminf(hypotf(p.vx, p.vy), latest);
     } else if (dt >= 3) {
-      p.vx = p.vy = p.turn = 0;
+      p.vx = p.vy = p.turn = p.speed = 0;
     }
     if (dt <= 0.05f) return;            // the same moment sent for another area: nothing new
   } else if (!p.valid) {
@@ -319,6 +341,8 @@ void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_
     off_h = Wrap180(before_h - nh);
   } else {
     off_x = off_y = off_h = 0;
+    cam_h = nh;                         // first picture: start facing the right way
+    turn_dir = 0;
   }
   off_at = now;
   Update_Camera(now);
@@ -382,19 +406,25 @@ static uint16_t Round_Route(const float (*in)[2], uint8_t n, float r_target, flo
   return m;
 }
 
-void Map_Layer_Set_Route(const int16_t (*pts)[2], uint8_t count)
+void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
 {
-  // The route is relative to the rider at the latest pose: remember where that was
-  if (!last_pose.valid) return;
-  route_area = last_pose.area;
-  route_ox = last_pose.x;
-  route_oy = last_pose.y;
+  // The phone repeats the route with every update: nothing to do if it hasn't changed
+  static int16_t last[32][2];
+  static uint8_t last_count = 0;
+  static uint16_t last_area = 0xFFFF;
+  if (count > 32) count = 32;
+  if (area_id == last_area && count == last_count && memcmp(last, pts, count * sizeof(last[0])) == 0) return;
+  memcpy(last, pts, count * sizeof(last[0]));
+  last_count = count;
+  last_area = area_id;
+
+  route_area = area_id;
+  route_ox = route_oy = 0;                  // points are already in that area's frame
   has_route = true;
   static float in[32][2];
-  if (count > 32) count = 32;
   for (uint8_t i = 0; i < count; i++) { in[i][0] = pts[i][0]; in[i][1] = pts[i][1]; }
-  float r = ROUTE_BEND_PX / fmaxf(zoom_target > 0 ? zoom_target : 1, 0.3f);
-  route_count = count >= 2 ? Round_Route(in, count, r, route) : 0;
+  // Corners rounded with a fixed radius in metres, so the route keeps its shape as the zoom changes
+  route_count = count >= 2 ? Round_Route(in, count, ROUTE_BEND_M, route) : 0;
   if (route_count) route_along[0] = 0;
   for (uint16_t i = 1; i < route_count; i++)
     route_along[i] = route_along[i - 1] + hypotf(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]);

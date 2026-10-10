@@ -593,14 +593,14 @@ void Nav_Screen_Set_Stale(bool now_stale)
   Show_If(stale_veil, stale);
 }
 
-void Nav_Screen_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg)
+void Nav_Screen_Set_Pose(uint16_t area_id, float x, float y, float heading_deg)
 {
   Map_Layer_Set_Pose(area_id, x, y, heading_deg);
 }
 
-void Nav_Screen_Set_Route(const int16_t (*pts)[2], uint8_t count)
+void Nav_Screen_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
 {
-  Map_Layer_Set_Route(pts, count);
+  Map_Layer_Set_Route(area_id, pts, count);
 }
 
 Screen_Mode Nav_Screen_Mode(void)

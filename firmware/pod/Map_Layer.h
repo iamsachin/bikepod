@@ -20,10 +20,10 @@ void Map_Data_End(uint16_t area_id, uint16_t road_count);
 // LVGL side (main loop only)
 lv_obj_t *Map_Layer_Create(lv_obj_t *parent, lv_coord_t w, lv_coord_t h, lv_coord_t marker_x, lv_coord_t marker_y);
 void Map_Layer_Poll(void);                                   // picks up a newly completed area
-void Map_Layer_Set_Pose(uint16_t area_id, int16_t x, int16_t y, int16_t heading_deg);
+void Map_Layer_Set_Pose(uint16_t area_id, float x, float y, float heading_deg);
 void Map_Layer_Set_Target_Scale(float pixels_per_metre);    // zoom eases towards this
-// Route, north-up metres relative to the rider at the latest pose (same origin as POSE)
-void Map_Layer_Set_Route(const int16_t (*pts)[2], uint8_t count);
+// Route, whole metres in a map area's frame
+void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count);
 void Map_Layer_Clear_Route(void);
 bool Map_Layer_Has_Map(void);
 void Map_Layer_Clear(void);

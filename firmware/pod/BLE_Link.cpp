@@ -140,9 +140,9 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     String p = Rest(text, 2);
     int c1 = p.indexOf(','), c2 = p.indexOf(',', c1 + 1);
     if (c1 < 0 || c2 < 0) return false;
-    msg->pose[0] = p.substring(0, c1).toInt();
-    msg->pose[1] = p.substring(c1 + 1, c2).toInt();
-    msg->pose[2] = p.substring(c2 + 1).toInt();
+    msg->pose[0] = p.substring(0, c1).toInt() / 10.0f;      // sent in tenths
+    msg->pose[1] = p.substring(c1 + 1, c2).toInt() / 10.0f;
+    msg->pose[2] = p.substring(c2 + 1).toInt() / 10.0f;
     return true;
   }
 
@@ -154,7 +154,8 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   }
   if (kind == "RPATH") {
     msg->kind = MSG_ROUTE;
-    msg->path_count = Parse_Path(Rest(text, 1), msg->path);
+    msg->area_id = Field(text, 1).toInt();
+    msg->path_count = Parse_Path(Rest(text, 2), msg->path);
     return true;
   }
   if (kind == "REROUTE") {

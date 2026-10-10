@@ -229,14 +229,15 @@ final class Navigator {
                                          metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
                                          junctions: junctions) {
             pathAlong = result.along
-            // The pod draws the route on its map through a moving camera, so it wants the route
-            // north-up around the same origin as POSE (turn the heading-up shape back)
-            let h = result.headingDegrees * .pi / 180
-            pathLine = "RPATH|" + result.shape.map { p -> String in
-                let right = Double(p.x), ahead = Double(p.y)
-                let east = right * cos(h) + ahead * sin(h), north = -right * sin(h) + ahead * cos(h)
-                return "\(Int(east.rounded())),\(Int(north.rounded()))"
-            }.joined(separator: ";")
+            // Route for the pod's map, in the map area's fixed frame (whole metres from the area's
+            // reference point): the same route gives the same numbers every update, so it doesn't
+            // wobble the way points relative to the moving rider did
+            if let frame = mapFeed.frame {
+                let o = frame.project(result.origin.lat, result.origin.lng)
+                pathLine = "RPATH|\(mapFeed.areaID)|" + result.northUp.map {
+                    "\(Int((o.x + $0.x).rounded())),\(Int((o.y + $0.y).rounded()))"
+                }.joined(separator: ";")
+            }
             // Street map: same origin and heading as the route, so they line up
             let origin = result.origin
             poseLine = mapFeed.pose(lat: origin.lat, lng: origin.lng, headingDegrees: result.headingDegrees) ?? ""

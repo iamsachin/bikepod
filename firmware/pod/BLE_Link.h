@@ -6,15 +6,14 @@
 // The phone writes one UTF-8 line at a time to the "Nav" characteristic:
 //   L|400|MG Rd               next turn: L = left, R = right, S = straight, metres, road name
 //   TRIP|18:42|6.0            arrival time and kilometres left
-//   RPATH|-2,-30;0,0;3,85;... route around the rider in metres, north-up (+x east, +y north),
-//                             relative to the rider at the latest POSE (the rider is 0,0)
+//   RPATH|7|-2,-30;3,85;...   route around the rider, whole metres in map area 7's frame
 //   MAPBEGIN|7|12.9|77.6      start of map area 7 (roads around the rider, see Map_Layer.h),
 //                             with its reference point (latitude, longitude)
 //   MAP|7|2|-120,40;-80,35;.. one road of area 7: class (1 major, 2 medium, 3 minor), points in
 //                             metres north-up from the area's reference point
 //   FUEL|7|40,85;-120,300     fuel stations in area 7 (same frame as MAP)
 //   MAPEND|7|96               area 7 complete with 96 roads: the pod switches to it
-//   POSE|7|12,-40,85          rider in area 7's frame: x, y metres and heading in degrees
+//   POSE|7|120,-405,853       rider in area 7's frame: x, y and heading in tenths (metres, degrees)
 //   SPD|123                   GPS speed in tenths of a metre per second (for the lean estimate)
 //   REROUTE                   off route, a new route is being fetched
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
@@ -48,7 +47,7 @@ struct Nav_Message {
   int16_t path[NAV_PATH_MAX_POINTS][2];
   // MSG_POSE
   uint16_t area_id;
-  int16_t pose[3];                          // x, y, heading
+  float pose[3];                            // x, y (metres), heading (degrees)
 };
 
 void BLE_Link_Init(void);
