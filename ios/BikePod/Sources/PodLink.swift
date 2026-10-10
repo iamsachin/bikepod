@@ -43,6 +43,8 @@ final class PodLink: NSObject {
     private(set) var lastSent: String = ""
     /// Goes up by one on every (re)connection, so senders know when the pod needs a full resend
     private(set) var connectionID = 0
+    /// The pod's battery, 0-100, as it last reported it (nil until it does, or when not connected)
+    private(set) var podBattery: Int?
     /// When the current connection was made
     private(set) var connectedAt = Date.distantPast
 
@@ -179,6 +181,7 @@ extension PodLink: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         navChar = nil
+        podBattery = nil
         clearQueues()
         // Ask to reconnect straight away (works in the background, no scan needed)
         use(peripheral)
@@ -193,6 +196,10 @@ extension PodLink: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.eventCharUUID, let data = characteristic.value,
               let line = String(data: data, encoding: .utf8) else { return }
+        if line.hasPrefix("BATTERY|") {
+            podBattery = Int(line.dropFirst("BATTERY|".count))
+            return
+        }
         if !line.hasPrefix("LEAN|") { DebugLog.write("LINK event \(line.prefix(80))") }   // LEAN: every 2 s
         for handler in eventHandlers { handler(line) }
     }

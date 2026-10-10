@@ -81,6 +81,7 @@ void Screenshot_Poll(void)
     if (c == '\n' || c == '\r') {
       cmd[len] = 0;
       if (strcmp(cmd, "shot") == 0) Screenshot_Send();
+      else if (strncmp(cmd, "batfake ", 8) == 0) Battery_Fake(atoi(cmd + 8));
       else if (strcmp(cmd, "bat") == 0) printf("BAT %.3f V, %d%%\r\n", Battery_Volts(), Battery_Percent());
       else if (strncmp(cmd, "msg ", 4) == 0) BLE_Link_Inject(String(cmd + 4));
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();

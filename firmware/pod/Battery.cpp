@@ -8,6 +8,7 @@
 
 static float samples[SAMPLES];
 static int count = 0, head = 0;
+static int fake = -1;
 
 void Battery_Init(void)
 {
@@ -33,8 +34,14 @@ float Battery_Volts(void)
   return sum / count;
 }
 
+void Battery_Fake(int percent)
+{
+  fake = percent;
+}
+
 int Battery_Percent(void)
 {
+  if (fake >= 0) return fake;
   if (!count) return -1;
   // Resting voltage of a single LiPo cell against charge left (typical curve)
   static const float volts[]   = { 3.30f, 3.50f, 3.60f, 3.68f, 3.74f, 3.79f, 3.85f, 3.92f, 4.00f, 4.08f, 4.18f };

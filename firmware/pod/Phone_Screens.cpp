@@ -13,6 +13,7 @@
 #include "Clock.h"
 #include "Map_Layer.h"
 #include "Settings.h"
+#include "Status_Bar.h"
 #include "BLE_Link.h"
 #include <mbedtls/base64.h>
 #include <esp_heap_caps.h>
@@ -385,7 +386,7 @@ void Music_Screen_Show(bool show)
 }
 
 /************************************ Updates ************************************/
-// While music plays: small sound bars at the top of the other pages; tap it for Now playing
+// While music plays: small sound bars in the status row on the other pages; tap for Now playing
 static lv_obj_t *note_btn;
 
 static void Note_Click(lv_event_t *e)
@@ -395,11 +396,10 @@ static void Note_Click(lv_event_t *e)
 
 static void Note_Create(void)
 {
-  note_btn = lv_label_create(lv_layer_top());   // created before the call overlay, so it sits under it
+  note_btn = lv_label_create(Status_Bar_Row());  // the status row sits under the call overlay
   lv_obj_set_style_text_font(note_btn, &font_playing_28, 0);
   lv_obj_set_style_text_color(note_btn, COLOR_BLUE, 0);
   lv_label_set_text(note_btn, ICON_PLAYING);
-  lv_obj_align(note_btn, LV_ALIGN_TOP_MID, 0, 56);   // between the rim and each page's first line
   lv_obj_add_flag(note_btn, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_ext_click_area(note_btn, 20);       // easier to hit with gloves
   lv_obj_add_event_cb(note_btn, Note_Click, LV_EVENT_CLICKED, NULL);

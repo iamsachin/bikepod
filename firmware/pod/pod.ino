@@ -17,6 +17,7 @@
 #include "Settings.h"
 #include "Clock.h"
 #include "Battery.h"
+#include "Status_Bar.h"
 #include "Phone_Screens.h"
 
 // The phone repeats its current message every ~2 s; after this long without one, fade the screen
@@ -97,6 +98,7 @@ void setup()
   lv_timer_set_period(_lv_disp_get_refr_timer(lv_disp_get_default()), 16);   // ~60 fps (default 30 ms)
 
   Nav_Screen_Create();              // starts on "Waiting for phone"
+  Status_Bar_Create();              // music + battery row (under the call overlay)
   Phone_Screens_Create(lv_scr_act());    // now playing (swipe right from navigation); incoming calls
   Journey_Screen_Create(lv_scr_act());   // swipe right again
   Lean_Screen_Create(lv_scr_act()); // swipe right again; calibrates: keep still at power-on
