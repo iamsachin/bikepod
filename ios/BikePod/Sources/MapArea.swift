@@ -21,8 +21,10 @@ enum MapArea {
         }
     }
 
-    /// MAPBEGIN, one MAP line per road piece, MAPEND
-    static func lines(id: Int, frame: Frame, roads: [MapRoad]) -> [String] {
+    static let maxFuel = 48                // the pod keeps up to 48 fuel stations per area
+
+    /// MAPBEGIN, one MAP line per road piece, FUEL lines (fuel stations), MAPEND
+    static func lines(id: Int, frame: Frame, roads: [MapRoad], fuel: [(lat: Double, lng: Double)] = []) -> [String] {
         // Keep the parts of each road inside the area, simplified to ~2.5 m
         var pieces: [(roadClass: RoadClass, points: [(x: Int, y: Int)], nearest: Double)] = []
         let limit = radiusMetres * 1.15
@@ -59,6 +61,20 @@ enum MapArea {
                 roadCount += 1
                 start = end - 1                        // chunks share their joining point
             }
+        }
+        // Fuel stations in the area, nearest first, a few per line. Tiles can list a station twice
+        // (e.g. as a point and as the label of its forecourt): merge any within 15 m.
+        var unique: [(x: Double, y: Double)] = []
+        for p in fuel.map({ frame.project($0.lat, $0.lng) }).filter({ hypot($0.x, $0.y) <= limit })
+        where !unique.contains(where: { hypot($0.x - p.x, $0.y - p.y) < 15 }) {
+            unique.append(p)
+        }
+        let pumps = unique
+            .sorted { hypot($0.x, $0.y) < hypot($1.x, $1.y) }
+            .prefix(maxFuel)
+            .map { "\(Int($0.x.rounded())),\(Int($0.y.rounded()))" }
+        for start in stride(from: 0, to: pumps.count, by: 16) {
+            out.append("FUEL|\(id)|" + pumps[start..<min(start + 16, pumps.count)].joined(separator: ";"))
         }
         out.append("MAPEND|\(id)|\(roadCount)")
         return out

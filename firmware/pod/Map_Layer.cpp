@@ -10,6 +10,7 @@
 
 #define MAP_MAX_ROADS   400
 #define MAP_MAX_POINTS  2400
+#define MAP_MAX_FUEL    48
 
 struct Map_Road { uint16_t start; uint8_t count; uint8_t road_class; };
 
@@ -20,6 +21,8 @@ struct Map_Area {
   bool overflow;
   Map_Road roads[MAP_MAX_ROADS];
   int16_t points[MAP_MAX_POINTS][2];
+  uint8_t fuel_count;
+  int16_t fuel[MAP_MAX_FUEL][2];
 };
 
 static Map_Area areas[2];
@@ -31,6 +34,10 @@ static portMUX_TYPE map_lock = portMUX_INITIALIZER_UNLOCKED;
 // Line widths and colours by road class: big roads a little wider and lighter
 static const lv_coord_t road_width[4] = { 0, 12, 9, 6 };
 static const uint32_t road_color[4] = { 0, 0x4A4A4A, 0x3A3A3A, 0x2C2C2C };
+
+LV_FONT_DECLARE(font_fuel_14);       // Material Icons Round "local_gas_station" only
+#define FUEL_GLYPH  "\xEE\x95\x86"      // U+E546 in UTF-8
+#define FUEL_BADGE  20                    // badge diameter, px
 
 static lv_obj_t *layer;
 static lv_coord_t center_x, center_y;
@@ -50,6 +57,7 @@ void Map_Data_Begin(uint16_t area_id)
   if (a) {
     a->id = area_id;
     a->road_count = a->point_count = 0;
+    a->fuel_count = 0;
     a->overflow = false;
   }
   portEXIT_CRITICAL(&map_lock);
@@ -69,6 +77,20 @@ void Map_Data_Add_Road(uint16_t area_id, uint8_t road_class, const int16_t (*pts
     a->point_count += count;
   } else if (a) {
     a->overflow = true;                       // too much map: the rest is dropped, area still usable
+  }
+  portEXIT_CRITICAL(&map_lock);
+}
+
+void Map_Data_Add_Fuel(uint16_t area_id, const int16_t (*pts)[2], uint8_t count)
+{
+  portENTER_CRITICAL(&map_lock);
+  Map_Area *a = building;
+  if (a && a->id == area_id) {
+    for (uint8_t i = 0; i < count && a->fuel_count < MAP_MAX_FUEL; i++) {
+      a->fuel[a->fuel_count][0] = pts[i][0];
+      a->fuel[a->fuel_count][1] = pts[i][1];
+      a->fuel_count++;
+    }
   }
   portEXIT_CRITICAL(&map_lock);
 }
@@ -186,6 +208,32 @@ static void Draw_Event(lv_event_t *e)
         prev = next;
       }
     }
+  }
+
+  // Fuel stations: a small dark round badge with an amber pump, kept upright as the map turns
+  if (active->fuel_count == 0) return;
+  lv_draw_rect_dsc_t badge;
+  lv_draw_rect_dsc_init(&badge);
+  badge.radius = LV_RADIUS_CIRCLE;
+  badge.bg_color = lv_color_hex(0x1E1E1E);
+  badge.bg_opa = LV_OPA_COVER;
+  badge.border_color = lv_color_hex(0x4A4A4A);
+  badge.border_width = 1;
+  badge.border_opa = LV_OPA_COVER;
+  lv_draw_label_dsc_t icon;
+  lv_draw_label_dsc_init(&icon);
+  icon.font = &font_fuel_14;
+  icon.color = lv_color_hex(0xF2B544);
+  const lv_coord_t r = FUEL_BADGE / 2;
+  for (uint8_t i = 0; i < active->fuel_count; i++) {
+    lv_point_t s = To_Screen(&box, active->fuel[i]);
+    lv_area_t area = { (lv_coord_t)(s.x - r), (lv_coord_t)(s.y - r), (lv_coord_t)(s.x + r - 1), (lv_coord_t)(s.y + r - 1) };
+    if (area.x2 < clip->x1 || area.x1 > clip->x2 || area.y2 < clip->y1 || area.y1 > clip->y2) continue;
+    lv_draw_rect(ctx, &badge, &area);
+    // The glyph's box inside its 14 px line: centre it in the badge
+    lv_area_t glyph = { (lv_coord_t)(s.x - 7), (lv_coord_t)(s.y - font_fuel_14.line_height / 2),
+                        (lv_coord_t)(s.x + 7), (lv_coord_t)(s.y + font_fuel_14.line_height / 2) };
+    lv_draw_label(ctx, &icon, &glyph, FUEL_GLYPH, NULL);
   }
 }
 

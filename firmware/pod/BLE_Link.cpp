@@ -115,6 +115,26 @@ static bool Handle_Map_Line(const String &text)
     Map_Data_Add_Road(id, road_class, pts, count);
     return true;
   }
+  if (text.startsWith("FUEL|")) {
+    static int16_t pts[16][2];
+    uint16_t id = Field(text, 1).toInt();
+    String list = Rest(text, 2);
+    uint8_t count = 0;
+    int pos = 0;
+    while (pos < (int)list.length() && count < 16) {
+      int semi = list.indexOf(';', pos);
+      if (semi < 0) semi = list.length();
+      int comma = list.indexOf(',', pos);
+      if (comma > pos && comma < semi) {
+        pts[count][0] = list.substring(pos, comma).toInt();
+        pts[count][1] = list.substring(comma + 1, semi).toInt();
+        count++;
+      }
+      pos = semi + 1;
+    }
+    Map_Data_Add_Fuel(id, pts, count);
+    return true;
+  }
   if (text.startsWith("MAPBEGIN|")) {
     Map_Data_Begin(Field(text, 1).toInt());
     return true;

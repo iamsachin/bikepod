@@ -14,7 +14,12 @@ final class MapFeed {
     private var previous: (id: Int, frame: MapArea.Frame)?
     private var building = false
     private var tileTemplate: String?
-    private var decoded: [String: [MapRoad]] = [:]       // tile key -> roads, in memory
+    private var decoded: [String: TileContent] = [:]     // tile URL -> roads and fuel stations, in memory
+
+    private struct TileContent {
+        let roads: [MapRoad]
+        let fuel: [(lat: Double, lng: Double)]
+    }
 
     private static let zoom = 14
     private static let fallbackTemplate = "https://tiles.openfreemap.org/planet/20261004_113936_pt/{z}/{x}/{y}.pbf"
@@ -39,13 +44,16 @@ final class MapFeed {
             defer { building = false }
             let template = await resolveTemplate()
             var roads: [MapRoad] = []
+            var fuel: [(lat: Double, lng: Double)] = []
             for t in VectorTile.tiles(around: lat, lng, radiusMetres: MapArea.radiusMetres, z: Self.zoom) {
-                roads += await tileRoads(template: template, x: t.x, y: t.y)
+                let content = await tileContent(template: template, x: t.x, y: t.y)
+                roads += content.roads
+                fuel += content.fuel
             }
             let nextID = areaID % 60_000 + 1
             let newFrame = MapArea.Frame(refLat: lat, refLng: lng)
             let lines = await Task.detached(priority: .utility) {
-                MapArea.lines(id: nextID, frame: newFrame, roads: roads)
+                MapArea.lines(id: nextID, frame: newFrame, roads: roads, fuel: fuel)
             }.value
             if let frame { previous = (areaID, frame) }
             areaID = nextID
@@ -79,11 +87,11 @@ final class MapFeed {
         return tileTemplate ?? Self.fallbackTemplate
     }
 
-    private func tileRoads(template: String, x: Int, y: Int) async -> [MapRoad] {
+    private func tileContent(template: String, x: Int, y: Int) async -> TileContent {
         let urlString = template.replacingOccurrences(of: "{z}", with: "\(Self.zoom)")
             .replacingOccurrences(of: "{x}", with: "\(x)").replacingOccurrences(of: "{y}", with: "\(y)")
-        if let roads = decoded[urlString] { return roads }
-        guard let url = URL(string: urlString) else { return [] }
+        if let content = decoded[urlString] { return content }
+        guard let url = URL(string: urlString) else { return TileContent(roads: [], fuel: []) }
 
         // Disk cache, named after the URL path (it includes the data version, so new data is refetched)
         let name = url.path.split(separator: "/").joined(separator: "_")
@@ -94,12 +102,13 @@ final class MapFeed {
             data = fresh
             try? fresh.write(to: file)
         }
-        guard let data else { return [] }
-        let roads = await Task.detached(priority: .utility) {
-            VectorTile.roads(from: data, z: Self.zoom, x: x, y: y)
+        guard let data else { return TileContent(roads: [], fuel: []) }
+        let content = await Task.detached(priority: .utility) {
+            TileContent(roads: VectorTile.roads(from: data, z: Self.zoom, x: x, y: y),
+                        fuel: VectorTile.fuelStations(from: data, z: Self.zoom, x: x, y: y))
         }.value
         if decoded.count > 16 { decoded.removeAll() }
-        decoded[urlString] = roads
-        return roads
+        decoded[urlString] = content
+        return content
     }
 }

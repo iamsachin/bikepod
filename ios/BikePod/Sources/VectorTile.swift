@@ -106,6 +106,57 @@ enum VectorTile {
         return roads
     }
 
+    /// Fuel stations (OpenStreetMap amenity=fuel) from the `poi` layer, as points
+    static func fuelStations(from data: Data, z: Int, x: Int, y: Int) -> [(lat: Double, lng: Double)] {
+        var reader = ProtoReader(data)
+        var stations: [(lat: Double, lng: Double)] = []
+        while let (field, wire) = reader.nextKey() {
+            guard field == 3, wire == 2, let layer = reader.bytes() else { reader.skip(wire); continue }
+            var lr = ProtoReader(layer)
+            var name = ""
+            var features: [Data] = []
+            var keys: [String] = []
+            var values: [String?] = []
+            var extent = 4096.0
+            while let (f, w) = lr.nextKey() {
+                switch (f, w) {
+                case (1, 2): name = lr.string() ?? ""
+                case (2, 2): if let feat = lr.bytes() { features.append(feat) }
+                case (3, 2): keys.append(lr.string() ?? "")
+                case (4, 2): values.append(lr.bytes().flatMap(stringValue))
+                case (5, 0): extent = Double(lr.varint() ?? 4096)
+                default: lr.skip(w)
+                }
+            }
+            guard name == "poi", let classKey = keys.firstIndex(of: "class") else { continue }
+            let tiles = Double(1 << z)
+            for feature in features {
+                var fr = ProtoReader(feature)
+                var tags: [Int] = []
+                var type = 0
+                var geometry: [Int] = []
+                while let (f, w) = fr.nextKey() {
+                    switch (f, w) {
+                    case (2, 2): tags = fr.packedVarints()
+                    case (3, 0): type = fr.varint() ?? 0
+                    case (4, 2): geometry = fr.packedVarints()
+                    default: fr.skip(w)
+                    }
+                }
+                guard type == 1, geometry.count >= 3 else { continue }       // points only
+                var isFuel = false
+                for i in stride(from: 0, to: tags.count - 1, by: 2) where tags[i] == classKey {
+                    isFuel = tags[i + 1] < values.count && values[tags[i + 1]] == "fuel"
+                }
+                guard isFuel else { continue }
+                let px = Double(zigzag(geometry[1])), py = Double(zigzag(geometry[2]))
+                let wx = (Double(x) + px / extent) / tiles, wy = (Double(y) + py / extent) / tiles
+                stations.append((atan(sinh(.pi * (1 - 2 * wy))) * 180 / .pi, wx * 360 - 180))
+            }
+        }
+        return stations
+    }
+
     private static func stringValue(_ data: Data) -> String? {
         var reader = ProtoReader(data)
         while let (field, wire) = reader.nextKey() {

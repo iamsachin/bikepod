@@ -14,6 +14,7 @@
 //   MAPBEGIN|7                start of map area 7 (roads around the rider, see Map_Layer.h)
 //   MAP|7|2|-120,40;-80,35;.. one road of area 7: class (1 major, 2 medium, 3 minor), points in
 //                             metres north-up from the area's reference point
+//   FUEL|7|40,85;-120,300     fuel stations in area 7 (same frame as MAP)
 //   MAPEND|7|96               area 7 complete with 96 roads: the pod switches to it
 //   POSE|7|12,-40,85          rider in area 7's frame: x, y metres and heading in degrees
 //   SPD|123                   GPS speed in tenths of a metre per second (for the lean estimate)

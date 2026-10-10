@@ -13,6 +13,7 @@ enum Map_Road_Class { MAP_MAJOR = 1, MAP_MEDIUM = 2, MAP_MINOR = 3 };
 // Called from the Bluetooth task while an area arrives (MAPBEGIN / MAP / MAPEND lines)
 void Map_Data_Begin(uint16_t area_id);
 void Map_Data_Add_Road(uint16_t area_id, uint8_t road_class, const int16_t (*pts)[2], uint8_t count);
+void Map_Data_Add_Fuel(uint16_t area_id, const int16_t (*pts)[2], uint8_t count);   // fuel stations
 void Map_Data_End(uint16_t area_id, uint16_t road_count);
 
 // LVGL side (main loop only)
