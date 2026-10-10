@@ -156,7 +156,7 @@ struct PodBatteryLabel: View {
 
     private var symbol: String {
         if charging { return "battery.100percent.bolt" }
-        switch percent {
+        return switch percent {
         case ..<13: "battery.0percent"
         case ..<38: "battery.25percent"
         case ..<63: "battery.50percent"
