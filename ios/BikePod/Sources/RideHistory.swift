@@ -40,11 +40,12 @@ final class RideRecorder {
                     topSpeedKmh: 0, maxLeanLeft: nil, maxLeanRight: nil, arrived: false, simulated: simulated)
     }
 
-    func add(_ location: UserLocation) {
+    /// - Parameter speedOverride: metres per second, for simulated rides (their positions carry none)
+    func add(_ location: UserLocation, speedOverride: Double? = nil) {
         // Rough fixes (in tunnels, between tall buildings) would add zigzags and distance
         guard ride.simulated || location.horizontalAccuracy <= 30 else { return }
         let now = Date()
-        let speed = max(0, location.speed?.value ?? 0)                 // metres per second
+        let speed = max(0, speedOverride ?? location.speed?.value ?? 0)  // metres per second
         if let lastUpdate, speed >= 1 {
             // Capped: after a gap in GPS, don't count time that can't be vouched for
             ride.movingSeconds += min(now.timeIntervalSince(lastUpdate), 5)

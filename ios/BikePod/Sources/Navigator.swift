@@ -5,6 +5,7 @@ import FerrostarCoreFFI
 import Foundation
 import Network
 import Observation
+import QuartzCore
 
 /// Turn-by-turn guidance: Valhalla plans the route, Ferrostar follows the GPS along it,
 /// and every change of "next turn / distance / road" is sent to the pod.
@@ -52,8 +53,14 @@ final class Navigator {
     /// The finished trip, for the Arrived card
     private(set) var lastTrip: (km: Double, seconds: TimeInterval)?
     /// The arrow on the phone's navigation map: on the route, pointing along it (see RoutePuck)
-    @ObservationIgnored private(set) var puckLocation: CLLocation?
     @ObservationIgnored private var routePuck = RoutePuck()
+    @ObservationIgnored private var puckMotion: PuckMotion?
+    @ObservationIgnored private var lastFixTime: CFTimeInterval = 0
+    /// Ferrostar's simulated positions carry no speed (it is always empty), so the pod got 0 and
+    /// its lateral g (speed x turn rate) and speed displays never moved: worked out here instead
+    @ObservationIgnored private var simulating = false
+    @ObservationIgnored private var simulatedSpeed = 0.0                       // metres per second
+    @ObservationIgnored private var lastSimulated: (location: CLLocation, at: Date)?
     /// Past rides; the one in progress is recorded as it goes
     let history = RideHistory()
     @ObservationIgnored private var recorder: RideRecorder?
@@ -242,6 +249,9 @@ final class Navigator {
             tripKm = route.distance / 1000
             lastTrip = nil
             recorder = RideRecorder(destination: destinationName, simulated: simulate)
+            simulating = simulate
+            simulatedSpeed = 0
+            lastSimulated = nil
             turnLine = ""
             tripLine = ""
             pathLine = ""
@@ -281,8 +291,11 @@ final class Navigator {
         hazards.clear()
         rerouting = false
         rerouteHeldUntil = .distantPast
-        puckLocation = nil
+        puckMotion = nil
         routePuck = RoutePuck()
+        simulating = false
+        simulatedSpeed = 0
+        lastSimulated = nil
         if phase != .idle { phase = .idle }
         updatePod()
     }
@@ -317,11 +330,38 @@ final class Navigator {
             updatePod()
             return
         }
-        if let location = state.preferredUserLocation { recorder?.add(location) }
-        if case let .navigating(_, raw, _, _, _, _, _, _, _, _, _) = state.tripState {
-            puckLocation = routePuck.place(raw, on: state.routeGeometry)
+        if case let .navigating(_, raw, _, _, _, _, _, _, _, _, _) = state.tripState, simulating {
+            let here = CLLocation(latitude: raw.coordinates.lat, longitude: raw.coordinates.lng), now = Date()
+            // Only on a new position: states also change without the rider moving
+            if let last = lastSimulated {
+                let moved = here.distance(from: last.location), seconds = now.timeIntervalSince(last.at)
+                if moved > 0.5, seconds > 0.05 {
+                    simulatedSpeed += (moved / seconds - simulatedSpeed) * 0.5
+                    lastSimulated = (here, now)
+                }
+            } else {
+                lastSimulated = (here, now)
+            }
+        }
+        if let location = state.preferredUserLocation {
+            recorder?.add(location, speedOverride: simulating ? simulatedSpeed : nil)
+        }
+        if case let .navigating(_, raw, _, _, _, _, _, _, _, _, _) = state.tripState,
+           let placed = routePuck.place(raw, on: state.routeGeometry) {
+            // Slide from where the arrow is now to the new fix, over the time the last fix took to
+            // come (states also change without a new fix: those leave the slide alone)
+            let now = CACurrentMediaTime()
+            if placed.along != puckMotion?.to || placed.newRoute {
+                let shown = puckMotion?.along(at: now) ?? placed.along
+                let gap = lastFixTime > 0 ? min(max(now - lastFixTime, 0.1), 1.5) : 0
+                let jump = placed.newRoute || abs(placed.along - shown) > 150
+                puckMotion = PuckMotion(from: jump ? placed.along : shown, to: placed.along, start: now,
+                                        duration: jump ? 0 : gap, horizontalAccuracy: raw.horizontalAccuracy,
+                                        speed: simulating ? simulatedSpeed : max(0, raw.speed?.value ?? 0))
+                lastFixTime = now
+            }
         } else {
-            puckLocation = nil
+            puckMotion = nil
         }
         guard state.isNavigating,
               let progress = state.currentProgress,
@@ -397,6 +437,14 @@ final class Navigator {
         updatePod()
     }
 
+    /// The arrow on the phone's navigation map at `time` (CACurrentMediaTime), on the route and
+    /// pointing along it; nil when off the route or not navigating (see RoutePuck)
+    func puckLocation(at time: CFTimeInterval) -> CLLocation? {
+        guard phase == .navigating, let motion = puckMotion else { return nil }
+        return routePuck.location(at: motion.along(at: time), horizontalAccuracy: motion.horizontalAccuracy,
+                                  speed: motion.speed)
+    }
+
     @discardableResult
     private func finishRide(arrived: Bool) -> Ride? {
         guard let recorder else { return nil }
@@ -416,7 +464,7 @@ final class Navigator {
     /// report the simulated speed)
     private var speedLine: String {
         let location = phase == .navigating ? navState?.preferredUserLocation : device?.lastLocation
-        let metresPerSecond = max(0, location?.speed?.value ?? 0)
+        let metresPerSecond = phase == .navigating && simulating ? simulatedSpeed : max(0, location?.speed?.value ?? 0)
         return "SPD|\(Int((metresPerSecond * 10).rounded()))"
     }
 

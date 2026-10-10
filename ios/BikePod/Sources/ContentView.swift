@@ -57,6 +57,13 @@ struct ContentView: View {
                            identifier: "preview-route", color: .systemBlue, casingColor: .white, below: routeAnchor)
             }
         }
+        // Each camera move lasts as long as the gap between locations (not a fixed second), so the
+        // camera keeps up with the arrow sliding along the route (see RoutePuck)
+        .unsafeMapViewControllerModifier { controller in
+            if !controller.mapView.dynamicNavigationCameraAnimationDuration {
+                controller.mapView.dynamicNavigationCameraAnimationDuration = true
+            }
+        }
         .navigationMapViewRouteOverlay { [routeAnchor] state in
             // (Ferrostar's own overlay draws the whole route twice, grey then blue: one blue line is the same)
             if let geometry = state?.routeGeometry, geometry.count >= 2 {
@@ -130,7 +137,7 @@ struct ContentView: View {
         }
         .sensoryFeedback(.warning, trigger: navigator.rerouting) { _, rerouting in rerouting }
         .task {
-            puckManager.placement = { [navigator] in navigator.puckLocation }
+            puckManager.placement = { [navigator] time in navigator.puckLocation(at: time) }
             navigator.activate()                        // GPS after the first screen is up
         }
     }
@@ -537,7 +544,7 @@ struct ContentView: View {
     /// facing their way, and only then set to follow again (a move of a few metres)
     private func rebuildMap() {
         let following = camera
-        let puck = navigator.puckLocation
+        let puck = navigator.puckLocation(at: CACurrentMediaTime())
         let here = navigator.navState?.preferredUserLocation ?? nil
         let coordinate = puck?.coordinate
             ?? here.map { CLLocationCoordinate2D(latitude: $0.coordinates.lat, longitude: $0.coordinates.lng) }
