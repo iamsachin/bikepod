@@ -244,10 +244,20 @@ void Lean_Set_Speed(float metres_per_second)
   }
 }
 
+static bool motion_faked = false;
+static float fake_lat = 0, fake_lon = 0;
+
+void Motion_Fake(bool on, float lat, float lon)
+{
+  motion_faked = on;
+  fake_lat = lat;
+  fake_lon = lon;
+}
+
 void Motion_Get(Motion *out)
 {
-  out->lateral_g = motion_lat;
-  out->longitudinal_g = motion_lon;
+  out->lateral_g = motion_faked ? fake_lat : motion_lat;
+  out->longitudinal_g = motion_faked ? fake_lon : motion_lon;
   out->peak_accel = peak_accel;
   out->peak_decel = peak_decel;
   out->peak_lat_left = peak_lat_l;

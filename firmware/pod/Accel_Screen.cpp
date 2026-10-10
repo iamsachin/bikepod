@@ -29,7 +29,7 @@ LV_FONT_DECLARE(font_small_26);
 #define DEADBAND        0.02f     // smaller than this shows as 0.00 (sensor noise standing still)
 
 static lv_obj_t *root, *dot;
-static lv_obj_t *lat_value, *lat_caption, *lon_value, *lon_caption;
+static lv_obj_t *lat_value, *lat_side, *lon_value, *lon_side;
 static lv_obj_t *peaks_lon, *peaks_lat;
 static lv_obj_t *graph_lat, *graph_lon;
 static lv_point_t pts_lat[MOTION_HISTORY_POINTS], pts_lon[MOTION_HISTORY_POINTS];
@@ -73,15 +73,19 @@ static lv_obj_t *Line(lv_obj_t *parent, lv_coord_t width, lv_color_t color)
   return line;
 }
 
-// A value over its caption, centred on x
-static void Column(lv_coord_t x, lv_obj_t **value, lv_obj_t **caption)
+// A value over its caption and, under that, which way (LEFT / RIGHT, ACCEL / BRAKE), centred
+// on x. The way is its own line: caption and way on one line ran into the screen's round edge.
+static void Column(lv_coord_t x, const char *caption, lv_obj_t **value, lv_obj_t **side)
 {
-  lv_obj_t *col = Box(root, 150, LV_SIZE_CONTENT);
+  lv_obj_t *col = Box(root, 140, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_pos(col, x - 75, CIRCLE_Y - 42);
+  lv_obj_set_pos(col, x - 70, CIRCLE_Y - 46);
   *value = Label(col, &font_title_44, lv_color_white());
-  *caption = Label(col, &font_small_26, COLOR_DIM);
+  lv_obj_t *cap = Label(col, &font_small_26, COLOR_DIM);
+  lv_label_set_text(cap, caption);
+  *side = Label(col, &font_small_26, COLOR_GREY);
+  lv_label_set_text(*side, " ");
 }
 
 static void Set_Text(lv_obj_t *label, const char *text)
@@ -104,10 +108,10 @@ static void Refresh(lv_timer_t *timer)
   char text[64];
   snprintf(text, sizeof(text), "%.2f", fabsf(lat));
   Set_Text(lat_value, text);
-  Set_Text(lat_caption, lat > 0 ? "LAT g " MIDDLE_DOT " R" : lat < 0 ? "LAT g " MIDDLE_DOT " L" : "LAT g");
+  Set_Text(lat_side, lat > 0 ? "RIGHT" : lat < 0 ? "LEFT" : " ");
   snprintf(text, sizeof(text), "%s%.2f", lon > 0 ? "+" : lon < 0 ? "-" : "", fabsf(lon));
   Set_Text(lon_value, text);
-  Set_Text(lon_caption, lon > 0 ? "LON g " MIDDLE_DOT " ACCEL" : lon < 0 ? "LON g " MIDDLE_DOT " BRAKE" : "LON g");
+  Set_Text(lon_side, lon > 0 ? "ACCEL" : lon < 0 ? "BRAKE" : " ");
 
   // Dot: right for a right-hand turn, up for speeding up; at most at the 1 g ring
   float len = sqrtf(lat * lat + lon * lon), k = len > 1 ? 1 / len : 1;
@@ -171,8 +175,8 @@ void Accel_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
   lv_obj_set_pos(dot, CIRCLE_X - DOT_D / 2, CIRCLE_Y - DOT_D / 2);
 
-  Column(100, &lat_value, &lat_caption);
-  Column(380, &lon_value, &lon_caption);
+  Column(102, "LAT g", &lat_value, &lat_side);
+  Column(378, "LON g", &lon_value, &lon_side);
 
   peaks_lon = Label(root, &font_small_26, COLOR_GREY);
   lv_label_set_recolor(peaks_lon, true);

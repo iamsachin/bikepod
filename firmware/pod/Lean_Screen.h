@@ -28,3 +28,5 @@ struct Motion {
   float history_lat[MOTION_HISTORY_POINTS], history_lon[MOTION_HISTORY_POINTS];
 };
 void Motion_Get(Motion *out);
+// Testing (serial "gfake -0.4 0.3": lateral, longitudinal; "gfake" alone = real readings)
+void Motion_Fake(bool on, float lat, float lon);

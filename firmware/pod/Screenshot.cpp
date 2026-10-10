@@ -85,6 +85,11 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
       else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
       else if (strcmp(cmd, "cal") == 0) Lean_Calibrate();
+      else if (strncmp(cmd, "gfake", 5) == 0) {
+        float lat = 0, lon = 0;
+        bool on = sscanf(cmd + 5, "%f %f", &lat, &lon) == 2;
+        Motion_Fake(on, lat, lon);
+      }
       else if (strcmp(cmd, "cam") == 0) Map_Layer_Debug_Print();
       else if (strcmp(cmd, "settings") == 0) Settings_Panel_Show(!Settings_Panel_Open());
       else if (strcmp(cmd, "waiting") == 0) Nav_Screen_Show_Waiting();
