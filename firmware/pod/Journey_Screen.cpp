@@ -15,11 +15,18 @@ LV_FONT_DECLARE(font_big_104);
 LV_FONT_DECLARE(font_title_44);
 LV_FONT_DECLARE(font_text_32);
 LV_FONT_DECLARE(font_small_26);
+LV_FONT_DECLARE(font_info_24);
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
 #define COLOR_DIM       lv_color_hex(0x6A6A6A)
 #define COLOR_TRACK     lv_color_hex(0x262626)
+#define COLOR_AMBER     lv_color_hex(0xF5B83D)
+#define COLOR_RED       lv_color_hex(0xE5484D)
+#define COLOR_GREEN     lv_color_hex(0x34C759)
+#define ICON_PHONE      "\xEE\x8C\xAC"     // U+E32C smartphone
+#define ICON_FUEL       "\xEE\x95\x86"     // U+E546 local_gas_station
+#define ICON_RAIN       "\xEE\x9E\x98"     // U+E798 water_drop
 
 #define RING_SIZE       462
 #define RING_WIDTH      8
@@ -56,6 +63,61 @@ static lv_obj_t *Label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color
 static void Set_Text(lv_obj_t *label, const char *text)
 {
   if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
+// The row under the stats: phone battery, next fuel, rain (each hidden until known)
+static lv_obj_t *phone_cell, *fuel_cell, *rain_cell;
+static lv_obj_t *phone_icon, *phone_val, *fuel_val, *rain_icon, *rain_val;
+
+static lv_obj_t *Info_Cell(lv_obj_t *row, const char *glyph, lv_color_t color, lv_obj_t **icon, lv_obj_t **value)
+{
+  lv_obj_t *cell = Box(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(cell, 5, 0);
+  *icon = Label(cell, &font_info_24, color);
+  lv_label_set_text(*icon, glyph);
+  *value = Label(cell, &font_small_26, COLOR_GREY);
+  lv_obj_add_flag(cell, LV_OBJ_FLAG_HIDDEN);
+  return cell;
+}
+
+static void Show_Cell(lv_obj_t *cell, bool show)
+{
+  if (show == lv_obj_has_flag(cell, LV_OBJ_FLAG_HIDDEN)) {
+    if (show) lv_obj_clear_flag(cell, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(cell, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void Journey_Set_Phone(int percent, bool charging)
+{
+  char text[12];
+  snprintf(text, sizeof(text), "%d%%", percent);
+  Set_Text(phone_val, text);
+  lv_color_t c = charging ? COLOR_GREEN : percent <= 20 ? COLOR_RED : COLOR_GREY;
+  lv_obj_set_style_text_color(phone_icon, c, 0);
+  Show_Cell(phone_cell, percent >= 0);
+}
+
+void Journey_Set_Fuel(uint32_t metres)
+{
+  char text[16];
+  if (metres >= 10000) snprintf(text, sizeof(text), "%lu km", (unsigned long)((metres + 500) / 1000));
+  else snprintf(text, sizeof(text), "%.1f km", metres / 1000.0f);
+  Set_Text(fuel_val, text);
+  Show_Cell(fuel_cell, metres > 0);
+}
+
+void Journey_Set_Rain(int minutes)
+{
+  char text[16];
+  if (minutes < 0) strcpy(text, "Dry");
+  else if (minutes == 0) strcpy(text, "Raining");
+  else snprintf(text, sizeof(text), "in %d min", minutes);
+  Set_Text(rain_val, text);
+  lv_obj_set_style_text_color(rain_icon, minutes >= 0 && minutes <= 30 ? COLOR_BLUE : COLOR_DIM, 0);
+  Show_Cell(rain_cell, true);
 }
 
 // One stat column: value over a small caption
@@ -159,6 +221,15 @@ void Journey_Screen_Create(lv_obj_t *parent)
   time_label = Stat(row, "RIDING");
   eta_label = Stat(row, "ARRIVE");
   avg_label = Stat(row, "AVG");
+
+  lv_obj_t *info = Box(trip_group, 360, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(info, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(info, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 378);
+  phone_cell = Info_Cell(info, ICON_PHONE, COLOR_GREY, &phone_icon, &phone_val);
+  lv_obj_t *fuel_icon;
+  fuel_cell = Info_Cell(info, ICON_FUEL, COLOR_AMBER, &fuel_icon, &fuel_val);
+  rain_cell = Info_Cell(info, ICON_RAIN, COLOR_DIM, &rain_icon, &rain_val);
 
   none_label = Label(root, &font_text_32, COLOR_DIM);
   lv_label_set_text(none_label, "No trip");

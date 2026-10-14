@@ -19,6 +19,11 @@
 //   SPD|123                   GPS speed in tenths of a metre per second (lean estimate, speed shown)
 //   LIMIT|50                  speed limit where the rider is, km/h (0 = not known)
 //   NIGHT|1                   it is dark where the phone is (sun below the horizon); 0 = day
+//   THEN|R|40                 the turn after the next one (L, R, S, O = roundabout) comes 40 m after
+//                             it ("then" under the road name); THEN|0 = not close
+//   PHONEBAT|78|1             the phone's battery % and 1 = charging
+//   FUELNEXT|4100             metres along the route to the next fuel station (0 = none known)
+//   RAIN|20                   minutes until rain on the route (0 = raining now, -1 = none in ~2 h)
 //   BUMP|85|7|120|-40         metres to the next mapped speed breaker (0 = none close); optionally
 //                             where it is: area 7, x 120, y -40 metres (the map draws a line to it)
 //   TIME|16|32|05             the phone's local time (sets the pod's clock)
@@ -40,7 +45,8 @@
 #define NAV_PATH_MAX_POINTS   40
 
 enum Msg_Kind { MSG_TURN, MSG_TRIP, MSG_ROUTE, MSG_POSE, MSG_SPEED, MSG_REROUTE, MSG_ARRIVED, MSG_CRUISE,
-                MSG_LIMIT, MSG_BUMP, MSG_TIME, MSG_NIGHT };
+                MSG_LIMIT, MSG_BUMP, MSG_TIME, MSG_NIGHT,
+                MSG_THEN, MSG_PHONEBAT, MSG_FUELNEXT, MSG_RAIN };
 
 struct Nav_Message {
   Msg_Kind kind;

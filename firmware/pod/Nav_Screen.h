@@ -18,6 +18,8 @@ void Nav_Screen_Set_Trip(const char *eta, float km_left);
 // The speed limit sign (bottom right, hidden at 0) and a speed breaker warning in place of the
 // arrival line (metres ahead, 0 = none)
 void Nav_Screen_Set_Limit(uint32_t kmh);
+// The turn after next (L, R, S, O = roundabout; 0 = none close), shown as "then" under the road
+void Nav_Screen_Set_Then(char dir, uint32_t gap_m);
 void Nav_Screen_Set_Bump(uint32_t metres);
 void Nav_Screen_Show_Waiting(void);
 void Nav_Screen_Show_Rerouting(const char *detail);   // detail: why (empty = "Finding a new route")

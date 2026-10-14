@@ -21,7 +21,8 @@ LV_IMG_DECLARE(app_icon);
 LV_FONT_DECLARE(font_big_104);    // Barlow Bold, digits and "." only
 LV_FONT_DECLARE(font_title_44);   // Barlow SemiBold, ASCII + middle dot
 LV_FONT_DECLARE(font_text_32);    // Barlow SemiBold, ASCII + middle dot
-LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
+LV_FONT_DECLARE(font_small_26);
+LV_FONT_DECLARE(font_then_30);   // Barlow SemiBold, ASCII + middle dot
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_TEXT      lv_color_hex(0xFFFFFF)
@@ -54,6 +55,7 @@ static lv_obj_t *turn_group;      // header + road + route drawing
 static lv_obj_t *dist_label;
 static lv_obj_t *unit_label;
 static lv_obj_t *road_label;
+static lv_obj_t *then_pill, *then_icon;   // "then" + the turn after next, when it comes close
 static lv_obj_t *eta_label;       // "18:42 · 6.0 km", shown on turn and rerouting screens
 static char eta_text[40] = "";    // ...what it says when no breaker warning is showing
 static lv_obj_t *limit_sign, *limit_label;
@@ -623,6 +625,22 @@ void Nav_Screen_Create(void)
   lv_label_set_long_mode(road_label, LV_LABEL_LONG_DOT);
   lv_obj_align(road_label, LV_ALIGN_TOP_MID, 0, 180);
 
+  // "then ↰": the turn after this one, when it comes right after (under the road name)
+  then_pill = Plain_Box(turn_group, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_color(then_pill, lv_color_hex(0x1E1E1E), 0);
+  lv_obj_set_style_bg_opa(then_pill, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(then_pill, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_hor(then_pill, 14, 0);
+  lv_obj_set_style_pad_ver(then_pill, 2, 0);
+  lv_obj_set_flex_flow(then_pill, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(then_pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(then_pill, 6, 0);
+  lv_obj_align(then_pill, LV_ALIGN_TOP_MID, 0, 222);
+  lv_obj_t *then_text = Label_Create(then_pill, &font_small_26, COLOR_GREY);
+  lv_label_set_text(then_text, "then");
+  then_icon = Label_Create(then_pill, &font_then_30, COLOR_TEXT);
+  lv_obj_add_flag(then_pill, LV_OBJ_FLAG_HIDDEN);
+
   /* The speed limit sign (bottom right), over the faded edge of the map. No speed: the bike's
      speedometer shows it */
   limit_sign = Plain_Box(turn_group, 62, 62);
@@ -782,6 +800,16 @@ void Nav_Screen_Set_Limit(uint32_t kmh)
     lv_obj_center(limit_label);
   }
   Show_If(limit_sign, kmh > 0);
+}
+
+void Nav_Screen_Set_Then(char dir, uint32_t gap_m)
+{
+  // Material Icons Round: turn_left, turn_right, straight, roundabout
+  const char *glyph = dir == 'L' ? "\xEE\xAE\xA6" : dir == 'R' ? "\xEE\xAE\xAB" :
+                      dir == 'S' ? "\xEE\xAD\x95" : dir == 'O' ? "\xEE\xAE\xA3" : NULL;
+  if (glyph) Set_Text(then_icon, glyph);
+  bool show = glyph != NULL;
+  if (show == lv_obj_has_flag(then_pill, LV_OBJ_FLAG_HIDDEN)) Show_If(then_pill, show);
 }
 
 void Nav_Screen_Set_Bump(uint32_t metres)
