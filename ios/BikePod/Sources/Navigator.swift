@@ -70,6 +70,20 @@ final class Navigator {
     @ObservationIgnored private var arrivedRide: Ride?
     /// The trip on the lock screen and in the Dynamic Island
     @ObservationIgnored private let liveActivity = TripActivityController()
+    /// Whether to show it (Settings; remembered). Off unless turned on: saves battery on long rides.
+    var liveActivityEnabled = UserDefaults.standard.object(forKey: "liveActivity") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(liveActivityEnabled, forKey: "liveActivity")
+            if !liveActivityEnabled {
+                liveActivity.end(arrived: false)
+            } else if phase == .navigating {
+                // Back on mid-ride: the next state update fills in the turn
+                liveActivity.start(destination: destinationName,
+                                   arrival: Date().addingTimeInterval(navState?.currentProgress?.durationRemaining ?? 0),
+                                   kmLeft: remainingKm)
+            }
+        }
+    }
 
     /// Updated as fixes arrive (reading the provider directly didn't refresh the screen)
     private(set) var hasGPS = false
@@ -267,9 +281,11 @@ final class Navigator {
             tripKm = route.distance / 1000
             lastTrip = nil
             recorder = RideRecorder(destination: destinationName, simulated: simulate)
-            liveActivity.start(destination: destinationName,
-                               arrival: Date().addingTimeInterval(route.steps.reduce(0) { $0 + $1.duration }),
-                               kmLeft: route.distance / 1000)
+            if liveActivityEnabled {
+                liveActivity.start(destination: destinationName,
+                                   arrival: Date().addingTimeInterval(route.steps.reduce(0) { $0 + $1.duration }),
+                                   kmLeft: route.distance / 1000)
+            }
             arrivedRide = nil
             simulating = simulate
             simulatedSpeed = 0

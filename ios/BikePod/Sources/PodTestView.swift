@@ -27,10 +27,11 @@ struct PodTestView: View {
                 Section {
                     Toggle("Voice guidance", isOn: Binding(get: { !navigator.isMuted },
                                                            set: { navigator.setMuted(!$0) }))
+                    Toggle("Lock screen & Dynamic Island", isOn: $navigator.liveActivityEnabled)
                 } header: {
                     Text("Navigation")
                 } footer: {
-                    Text("Spoken turn instructions from the phone. Also on the speaker button while navigating.")
+                    Text("Voice: spoken turn instructions from the phone (also on the speaker button while navigating). Lock screen & Dynamic Island: the next turn while the phone is locked or in another app; off saves battery on long rides.")
                 }
                 Section {
                     Toggle("Simulate rides", isOn: $navigator.simulateRides)
