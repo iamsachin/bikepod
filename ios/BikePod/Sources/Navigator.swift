@@ -637,6 +637,7 @@ final class Navigator {
     /// Route drawings go at most 4 times a second so a fast simulation can't flood the link.
     /// A whole map area: ~100-250 lines, sent once per area (and again after a reconnect)
     private func sendMapArea(_ lines: [String]) {
+        PodFeedRecorder.recordArea(lines)
         guard link.state == .connected else { return }
         // MAPBEGIN (the area's reference point) goes with the live lines: poses and the route switch
         // to the new area's frame at once, and the pod can't place them without it. Queued in bulk
@@ -663,6 +664,7 @@ final class Navigator {
             let throttled = kind == "path" || kind == "stub" || kind.hasPrefix("pose") || kind == "speed" || kind == "bump"
             guard (changed && (!throttled || age >= 0.25)) || age >= 2 else { continue }
             lastPodSent[kind] = (line, now)
+            PodFeedRecorder.record([line])
             link.send(line: line, kind: kind)
         }
     }

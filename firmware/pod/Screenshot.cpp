@@ -69,11 +69,49 @@ static void Screenshot_Send(void)
   screenshot_sending = false;
 }
 
+// Temporary profiler (serial "tprof"): times every LVGL timer callback, printed every 2 s
+#define TPROF_MAX 24
+static struct { lv_timer_t *t; lv_timer_cb_t cb; uint32_t us, n, worst; } tprof[TPROF_MAX];
+static int tprof_count = 0;
+static bool tprof_on = false;
+static void Tprof_Trampoline(lv_timer_t *t)
+{
+  for (int i = 0; i < tprof_count; i++)
+    if (tprof[i].t == t) {
+      uint32_t start = micros();
+      tprof[i].cb(t);
+      uint32_t us = micros() - start;
+      tprof[i].us += us; tprof[i].n++; if (us > tprof[i].worst) tprof[i].worst = us;
+      return;
+    }
+}
+static void Tprof_Wrap(void)
+{
+  for (lv_timer_t *t = lv_timer_get_next(NULL); t; t = lv_timer_get_next(t)) {
+    if (t->timer_cb == Tprof_Trampoline || tprof_count >= TPROF_MAX) continue;
+    tprof[tprof_count].t = t; tprof[tprof_count].cb = t->timer_cb; tprof_count++;
+    t->timer_cb = Tprof_Trampoline;
+  }
+}
+void Tprof_Report(void)
+{
+  static uint32_t since = 0;
+  if (!tprof_on || millis() - since < 2000) return;
+  since = millis();
+  Tprof_Wrap();                                   // timers created since
+  for (int i = 0; i < tprof_count; i++) {
+    if (!tprof[i].n) continue;
+    printf("TPROF cb %p period %lu: %lu calls, %lu us total, worst %lu us\r\n", (void *)tprof[i].cb,
+           (unsigned long)tprof[i].t->period, (unsigned long)tprof[i].n, (unsigned long)tprof[i].us, (unsigned long)tprof[i].worst);
+    tprof[i].us = tprof[i].n = tprof[i].worst = 0;
+  }
+}
+
 // Serial commands from the Mac: "shot", "msg <line>" (inject a phone line), "test off", "perf",
 // "page <n>" (switch screen), "cal" (recalibrate lean), "imu" (print sensor readings)
 void Screenshot_Poll(void)
 {
-  static char cmd[256];
+  static char cmd[600];                         // map and route lines replayed over USB run to ~520
   static uint16_t len = 0;
   while (Serial.available()) {
     char c = Serial.read();
@@ -83,6 +121,7 @@ void Screenshot_Poll(void)
       else if (strncmp(cmd, "msg ", 4) == 0) BLE_Link_Inject(String(cmd + 4));
       else if (strcmp(cmd, "test off") == 0) BLE_Link_End_Test();
       else if (strcmp(cmd, "perf") == 0) perf_report = !perf_report;
+      else if (strcmp(cmd, "tprof") == 0) { tprof_on = !tprof_on; Tprof_Wrap(); }
       else if (strncmp(cmd, "page ", 5) == 0) Pages_Show(atoi(cmd + 5));
       else if (strcmp(cmd, "cal") == 0) Lean_Request_Calibration();
       else if (strncmp(cmd, "gfake", 5) == 0) {

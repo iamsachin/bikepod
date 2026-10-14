@@ -426,3 +426,13 @@ void Set_Backlight(uint8_t Light)                        //
 }
 
 
+
+// The screen is fed from PSRAM 18 million pixels a second. When drawing and Bluetooth crowd PSRAM,
+// the feed can fall a little behind and the picture stays shifted sideways from then on (seen on
+// the lean page). Asking for a restart only sets a flag: the driver re-aligns at the next frame
+// start, invisibly when nothing slipped. (Its automatic version, CONFIG_LCD_RGB_RESTART_IN_VSYNC,
+// is off in Arduino's prebuilt libraries.)
+void LCD_Resync(void)
+{
+  if (panel_handle) esp_lcd_rgb_panel_restart(panel_handle);
+}

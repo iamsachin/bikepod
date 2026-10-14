@@ -153,5 +153,8 @@ void loop()
   Lvgl_Loop();
   Perf_Measure(micros() - start);
   Screenshot_Poll();
+  extern void Tprof_Report(void); Tprof_Report();
+  static uint32_t resync_ms = 0;
+  if (millis() - resync_ms >= 500) { resync_ms = millis(); LCD_Resync(); }
   delay(5);
 }

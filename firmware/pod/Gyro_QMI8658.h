@@ -159,3 +159,4 @@ float getGyroY();
 float getGyroZ();
 void getAccelerometer(void);
 void getGyroscope(void);
+void getMotion(void);         // both at once

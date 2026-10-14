@@ -274,6 +274,22 @@ void getAccelerometer(void)
     Accel.z = Accel.z * accelScales;
 
 }
+// Accelerometer and gyroscope in one read (their registers follow each other): one bus
+// transaction instead of two
+void getMotion(void)
+{
+    uint8_t buf[12];
+    I2C_Read(Device_addr, QMI8658_AX_L, buf, 12);
+    int16_t raw[6];
+    for (int i = 0; i < 6; i++) raw[i] = (int16_t)((buf[2 * i + 1] << 8) | buf[2 * i]);
+    Accel.x = raw[0] * accelScales;
+    Accel.y = raw[1] * accelScales;
+    Accel.z = raw[2] * accelScales;
+    Gyro.x = raw[3] * gyroScales;
+    Gyro.y = raw[4] * gyroScales;
+    Gyro.z = raw[5] * gyroScales;
+}
+
 void getGyroscope(void)
 {
     uint8_t buf[6];

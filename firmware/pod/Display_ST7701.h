@@ -85,6 +85,7 @@ bool example_on_vsync_event(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_pane
 void ST7701_Init();
 
 void LCD_Init();
+void LCD_Resync(void);   // call regularly: puts a slipped picture back in place at the next frame
 void LCD_addWindow(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend,uint8_t* color);
 
 // backlight

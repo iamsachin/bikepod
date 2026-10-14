@@ -120,8 +120,7 @@ static bool visible = false;
 /********************************* Sensor *********************************/
 static void Sample(lv_timer_t *timer)
 {
-  getAccelerometer();
-  getGyroscope();
+  getMotion();
   Vec a = { Accel.x, Accel.y, Accel.z };    // g
   Vec w = { Gyro.x, Gyro.y, Gyro.z };       // degrees per second
 
