@@ -41,6 +41,7 @@
 		EBC2A9F839212C3B0FF6A63A /* Weather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B95CFF9135FAA348D038D /* Weather.swift */; };
 		ED9F3523316EEFFF2867925F /* MapFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D47BD68CE41B64E0D79683 /* MapFeed.swift */; };
 		F95628F2E96ED49E9BEF07F6 /* BikePodWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 151DA749B0FFEBE31DC3845C /* BikePodWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F9C57186CC6EAE45CEC70955 /* TurnBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCFA2478AAA80672E4B11F2D /* TurnBanner.swift */; };
 		FD0853F747217638E55A673C /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98369CA1E6068DD5C6A845FE /* DebugLog.swift */; };
 /* End PBXBuildFile section */
 
@@ -94,6 +95,7 @@
 		A5E27F085223AA78E91B5373 /* TripActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityController.swift; sourceTree = "<group>"; };
 		AB5D90407BB5B2ED7CA984F4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B462DF9A1737F4ABB6561F25 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
+		BCFA2478AAA80672E4B11F2D /* TurnBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnBanner.swift; sourceTree = "<group>"; };
 		CD9D006E312984F5993A20B2 /* BikePodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikePodWidgets.swift; sourceTree = "<group>"; };
 		DF8B8E3DEB099F516B18C47F /* VectorTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorTile.swift; sourceTree = "<group>"; };
 		E16B1117B4E5FF5B1D498373 /* PathShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathShape.swift; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 				AB5D90407BB5B2ED7CA984F4 /* SettingsView.swift */,
 				F62A27F92695E5849DA78ECB /* Sun.swift */,
 				A5E27F085223AA78E91B5373 /* TripActivityController.swift */,
+				BCFA2478AAA80672E4B11F2D /* TurnBanner.swift */,
 				DF8B8E3DEB099F516B18C47F /* VectorTile.swift */,
 				585B95CFF9135FAA348D038D /* Weather.swift */,
 			);
@@ -325,6 +328,7 @@
 				A678246EB7AD01BD7C79419C /* Sun.swift in Sources */,
 				5A3B5CEC33F1348ABBB49146 /* TripActivity.swift in Sources */,
 				A958E86AC87600D124112C8D /* TripActivityController.swift in Sources */,
+				F9C57186CC6EAE45CEC70955 /* TurnBanner.swift in Sources */,
 				9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */,
 				EBC2A9F839212C3B0FF6A63A /* Weather.swift in Sources */,
 			);

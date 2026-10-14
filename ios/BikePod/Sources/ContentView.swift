@@ -70,6 +70,9 @@ struct ContentView: View {
                 controller.mapView.dynamicNavigationCameraAnimationDuration = true
             }
         }
+        .navigationViewInstructionView { state, isExpanded, size in
+            TurnBanner(navigationState: state, isExpanded: isExpanded, sizeWhenNotExpanded: size)
+        }
         .navigationMapViewRouteOverlay { [routeAnchor] state in
             // (Ferrostar's own overlay draws the whole route twice, grey then blue: one blue line is the same)
             if let geometry = state?.routeGeometry, geometry.count >= 2 {

@@ -438,7 +438,7 @@ final class Navigator {
             let right = point.map { junctionCapture.keepsRight(at: $0.lat, $0.lng) } ?? false
             turnLine = "O|\(distanceToTurn)|\(exit)|\(right ? -Int(degrees) : Int(degrees))|\(road)"
         } else {
-            let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier)
+            let dir = Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier, side: state.currentStep?.drivingSide)
             turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(road)"
         }
 
@@ -449,7 +449,7 @@ final class Navigator {
            let next = steps[1].visualInstructions.first?.primaryContent, next.maneuverType != .arrive {
             let letter: String
             if Self.isRoundabout(next.maneuverType) { letter = "O" }
-            else { letter = Self.podDirection(type: next.maneuverType, modifier: next.maneuverModifier).rawValue }
+            else { letter = Self.podDirection(type: next.maneuverType, modifier: next.maneuverModifier, side: steps[1].drivingSide).rawValue }
             thenLine = "THEN|\(letter)|\(Int(steps[1].distance.rounded()))"
         }
 
@@ -478,7 +478,7 @@ final class Navigator {
         } else if content.maneuverType == .arrive {
             symbol = "flag.checkered"
         } else {
-            switch Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier) {
+            switch Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier, side: state.currentStep?.drivingSide) {
             case .left: symbol = "arrow.turn.up.left"
             case .right: symbol = "arrow.turn.up.right"
             case .uTurnRight: symbol = TripActivityAttributes.uTurnRight
@@ -703,23 +703,16 @@ final class Navigator {
     }
 
     /// The pod draws left / right / straight arrows and U-turns (and roundabouts, above).
-    private static func podDirection(type: ManeuverType?, modifier: ManeuverModifier?) -> TurnDir {
+    private static func podDirection(type: ManeuverType?, modifier: ManeuverModifier?, side: DrivingSide?) -> TurnDir {
         if type == .arrive { return .straight }
         switch modifier {
         case .left, .slightLeft, .sharpLeft: return .left
         case .right, .slightRight, .sharpRight: return .right
-        case .uTurn: return drivesOnLeft ? .uTurnRight : .uTurnLeft
+        // U-turns swing away from the kerb: right where traffic keeps left (India; the default)
+        case .uTurn: return side == .right ? .uTurnLeft : .uTurnRight
         case .straight, .none: return .straight
         }
     }
-
-    /// U-turns swing round away from the kerb: right where traffic keeps left (India). The route
-    /// doesn't say which side, so the phone's region decides.
-    private static let drivesOnLeft: Bool = {
-        let left: Set<String> = ["IN", "GB", "IE", "JP", "AU", "NZ", "ZA", "SG", "MY", "TH", "ID", "LK", "BD",
-                                 "NP", "PK", "HK", "MO", "KE", "UG", "TZ", "CY", "MT", "BT", "MU"]
-        return left.contains(Locale.current.region?.identifier ?? "IN")
-    }()
 
     /// Word endings shortened the way car navigators do, so names fit the pod's two lines.
     private static let abbreviations = [
