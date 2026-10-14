@@ -7,7 +7,7 @@
 
 #define CX 240.0f
 #define CY 240.0f
-#define MAX_ARCS 4
+#define MAX_ARCS 8
 
 struct Arc_Data {
   float radius, half;           // centre line radius, half the width

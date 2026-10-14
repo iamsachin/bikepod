@@ -5,6 +5,7 @@
                     riding counts up here between them so it ticks evenly.
 ******************************************************************************/
 #include "Journey_Screen.h"
+#include "Smooth_Arc.h"
 #include <Arduino.h>
 #include <stdio.h>
 #include "Pages.h"
@@ -72,10 +73,14 @@ static lv_obj_t *Stat(lv_obj_t *row, const char *caption)
 static void Refresh(lv_timer_t *timer)
 {
   if (!visible) return;
-  lv_obj_add_flag(have_trip ? none_label : trip_group, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_clear_flag(have_trip ? trip_group : none_label, LV_OBJ_FLAG_HIDDEN);
+  // Only on a change: LVGL redraws an object whenever it's hidden or shown, even if it already
+  // was, and this runs every second (the whole page every second: 140 ms frames)
+  if (lv_obj_has_flag(trip_group, LV_OBJ_FLAG_HIDDEN) == have_trip) {
+    lv_obj_add_flag(have_trip ? none_label : trip_group, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(have_trip ? trip_group : none_label, LV_OBJ_FLAG_HIDDEN);
+  }
   if (!have_trip) {
-    lv_arc_set_value(ring, 0);
+    Smooth_Arc_Set(ring, 0, 0);
     return;
   }
   float done = LV_MAX(km_total - km_left, 0.0f);
@@ -95,8 +100,7 @@ static void Refresh(lv_timer_t *timer)
   else snprintf(text, sizeof(text), "-");
   Set_Text(avg_label, text);
 
-  int16_t deg = km_total > 0 ? (int16_t)LV_CLAMP(0.0f, done / km_total * 360, 360.0f) : 0;
-  if (lv_arc_get_value(ring) != deg) lv_arc_set_value(ring, deg);
+  Smooth_Arc_Set(ring, 0, km_total > 0 ? LV_CLAMP(0.0f, done / km_total * 360, 360.0f) : 0);
 }
 
 void Journey_Set(const char *eta, float left, float total, uint32_t elapsed_s)
@@ -123,20 +127,10 @@ void Journey_Screen_Create(lv_obj_t *parent)
   lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
   // Trip progress round the edge (starts at 12 o'clock, fills clockwise), on a faint track
-  ring = lv_arc_create(root);
-  lv_obj_set_size(ring, RING_SIZE, RING_SIZE);
-  lv_obj_center(ring);
-  lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
-  lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_pad_all(ring, 0, 0);
-  lv_obj_set_style_arc_width(ring, RING_WIDTH, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(ring, COLOR_TRACK, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(ring, RING_WIDTH, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(ring, COLOR_BLUE, LV_PART_INDICATOR);
-  lv_arc_set_rotation(ring, 270);
-  lv_arc_set_bg_angles(ring, 0, 360);
-  lv_arc_set_range(ring, 0, 360);
-  lv_arc_set_value(ring, 0);
+  // (Smooth_Arc: LVGL's own arc needed a mask buffer from its memory pool for this radius)
+  lv_obj_t *track = Smooth_Arc_Create(root, (RING_SIZE - RING_WIDTH) / 2.0f, RING_WIDTH, COLOR_TRACK);
+  Smooth_Arc_Set(track, 0, 360);
+  ring = Smooth_Arc_Create(root, (RING_SIZE - RING_WIDTH) / 2.0f, RING_WIDTH, COLOR_BLUE);
 
   trip_group = Box(root, LV_PCT(100), LV_PCT(100));
 
@@ -169,6 +163,7 @@ void Journey_Screen_Create(lv_obj_t *parent)
   none_label = Label(root, &font_text_32, COLOR_DIM);
   lv_label_set_text(none_label, "No trip");
   lv_obj_center(none_label);
+  lv_obj_add_flag(trip_group, LV_OBJ_FLAG_HIDDEN);     // starts as "No trip" (Refresh toggles on changes only)
 
   Pages_Add_Dots(root, PAGE_JOURNEY);
   lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
