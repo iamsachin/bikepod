@@ -94,6 +94,7 @@ void Screenshot_Poll(void)
       else if (strcmp(cmd, "settings") == 0) Settings_Panel_Show(!Settings_Panel_Open());
       else if (strcmp(cmd, "waiting") == 0) Nav_Screen_Show_Waiting();
       else if (strcmp(cmd, "art") == 0) Album_Art_Debug();
+      else if (strncmp(cmd, "fakemissed ", 11) == 0) Phone_Notify_Fake_Missed(cmd + 11);
       else if (strncmp(cmd, "fakecall", 8) == 0) Phone_Notify_Fake_Call(cmd[8] ? cmd + 9 : "");
       else if (strncmp(cmd, "fakemusic", 9) == 0) {
         // fakemusic Title|Artist|1

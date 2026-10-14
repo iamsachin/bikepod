@@ -23,6 +23,7 @@ LV_FONT_DECLARE(font_text_32);
 LV_FONT_DECLARE(font_small_26);
 LV_FONT_DECLARE(font_media_40);
 LV_FONT_DECLARE(font_playing_28);
+LV_FONT_DECLARE(font_missed_28);
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_GREY      lv_color_hex(0xA8A8A8)
@@ -386,6 +387,66 @@ void Music_Screen_Show(bool show)
 }
 
 /************************************ Updates ************************************/
+/* Missed call: a red phone in the status row on every page; tap it to see who ("Missed call ·
+   Name" for 3 s) and clear it. Also cleared when the notification is cleared on the phone. */
+#define ICON_MISSED     "\xEE\x98\x9F"      // U+E61F phone_missed
+#define COLOR_RED       lv_color_hex(0xE5484D)
+#define MIDDLE_DOT      "\xC2\xB7"
+static lv_obj_t *missed_btn, *missed_toast;
+static uint32_t toast_until = 0;
+
+static void Missed_Click(lv_event_t *e)
+{
+  Phone_State s;
+  Phone_Notify_Get(&s);
+  char text[80];
+  snprintf(text, sizeof(text), "Missed call " MIDDLE_DOT " %s", s.missed_caller[0] ? s.missed_caller : "Unknown");
+  lv_label_set_text(lv_obj_get_child(missed_toast, 0), text);
+  lv_obj_clear_flag(missed_toast, LV_OBJ_FLAG_HIDDEN);
+  toast_until = millis() + 3000;
+  Phone_Notify_Clear_Missed();
+}
+
+static void Missed_Create(void)
+{
+  missed_btn = lv_label_create(Status_Bar_Row());
+  lv_obj_set_style_text_font(missed_btn, &font_missed_28, 0);
+  lv_obj_set_style_text_color(missed_btn, COLOR_RED, 0);
+  lv_label_set_text(missed_btn, ICON_MISSED);
+  lv_obj_add_flag(missed_btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(missed_btn, 20);
+  lv_obj_add_event_cb(missed_btn, Missed_Click, LV_EVENT_CLICKED, NULL);
+  lv_obj_add_flag(missed_btn, LV_OBJ_FLAG_HIDDEN);
+
+  missed_toast = lv_obj_create(lv_layer_top());
+  lv_obj_remove_style_all(missed_toast);
+  lv_obj_clear_flag(missed_toast, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_size(missed_toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_color(missed_toast, lv_color_hex(0x1E1E1E), 0);
+  lv_obj_set_style_bg_opa(missed_toast, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(missed_toast, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_hor(missed_toast, 18, 0);
+  lv_obj_set_style_pad_ver(missed_toast, 8, 0);
+  lv_obj_align(missed_toast, LV_ALIGN_TOP_MID, 0, 92);
+  lv_obj_t *label = lv_label_create(missed_toast);
+  lv_obj_set_style_text_font(label, &font_small_26, 0);
+  lv_obj_set_style_text_color(label, COLOR_RED, 0);
+  lv_obj_set_width(label, LV_SIZE_CONTENT);
+  lv_obj_set_style_max_width(label, 340, 0);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+  lv_obj_add_flag(missed_toast, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void Missed_Update(const Phone_State &s)
+{
+  bool show = s.missed_call && !Settings_Panel_Open() && !s.call_ringing;
+  if (show == lv_obj_has_flag(missed_btn, LV_OBJ_FLAG_HIDDEN)) Show_If(missed_btn, show);
+  if (toast_until && (int32_t)(millis() - toast_until) > 0) {
+    toast_until = 0;
+    lv_obj_add_flag(missed_toast, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
 // While music plays: small sound bars in the status row on the other pages; tap for Now playing
 static lv_obj_t *note_btn;
 
@@ -430,6 +491,7 @@ static void Tick(lv_timer_t *timer)
   }
   if (ringing) Set_Text(call_name, s.caller[0] ? s.caller : "Unknown caller");
   Note_Update(s);
+  Missed_Update(s);
 
   // Album art: ask for it when the song changes (again after 15 s if nothing came), draw it when complete
   static char last_song[112] = "";
@@ -468,6 +530,7 @@ static void Tick(lv_timer_t *timer)
 void Phone_Screens_Create(lv_obj_t *parent)
 {
   Music_Create(parent);
+  Missed_Create();                   // in the status row before the music bars
   Note_Create();
   Call_Create();
   lv_timer_create(Tick, 200, NULL);

@@ -31,6 +31,7 @@ static BLEUUID AMS_REMOTE_COMMAND("9B3C81D8-57B1-4A8A-B8DF-0E56F7CA51C2");
 #define REQUEST_COMMAND 0xFFFFFF00u           // queue items at or above this are media commands
 
 #define CATEGORY_INCOMING_CALL  1
+#define CATEGORY_MISSED_CALL    2
 #define EVENT_ADDED             0
 #define EVENT_REMOVED           2
 #define FLAG_PRE_EXISTING       0x04
@@ -46,6 +47,7 @@ static QueueHandle_t requests;                // notification UIDs to look up (c
 static BLERemoteCharacteristic *control_point = NULL;
 static BLERemoteCharacteristic *remote_command = NULL;
 static volatile uint32_t call_uid = 0xFFFFFFFF;
+static volatile uint32_t missed_uid = 0xFFFFFFFF;  // the latest missed-call notification
 
 static void Changed(void (*edit)(Phone_State &))
 {
@@ -76,7 +78,21 @@ static void Notification_Source(BLERemoteCharacteristic *, uint8_t *data, size_t
   if (len < 8) return;
   uint8_t event = data[0], flags = data[1], category = data[2];
   uint32_t uid = data[4] | data[5] << 8 | data[6] << 16 | (uint32_t)data[7] << 24;
-  if (category != CATEGORY_INCOMING_CALL || (flags & FLAG_PRE_EXISTING)) return;
+  if (flags & FLAG_PRE_EXISTING) return;
+  if (category == CATEGORY_MISSED_CALL) {
+    // Shown as a red phone icon until tapped on the pod or cleared on the phone
+    if (event == EVENT_ADDED) {
+      missed_uid = uid;
+      Changed([](Phone_State &s) { s.missed_call = true; s.missed_caller[0] = 0; });
+      xQueueSend(requests, &uid, 0);           // the worker asks for the caller's name
+      LOG("PHONE: missed call (uid %lu)\r\n", (unsigned long)uid);
+    } else if (event == EVENT_REMOVED && uid == missed_uid) {
+      missed_uid = 0xFFFFFFFF;
+      Changed([](Phone_State &s) { s.missed_call = false; });
+    }
+    return;
+  }
+  if (category != CATEGORY_INCOMING_CALL) return;
   if (event == EVENT_ADDED) {
     call_uid = uid;
     Changed([](Phone_State &s) { s.call_ringing = true; s.caller[0] = 0; });
@@ -94,11 +110,16 @@ static void Data_Source(BLERemoteCharacteristic *, uint8_t *data, size_t len, bo
   // 0, UID (4), then attribute ID, length (2), value
   if (len < 8 || data[0] != 0) return;
   uint32_t uid = data[1] | data[2] << 8 | data[3] << 16 | (uint32_t)data[4] << 24;
-  if (uid != call_uid || data[5] != 1) return;
+  if ((uid != call_uid && uid != missed_uid) || data[5] != 1) return;
   size_t value_len = data[6] | data[7] << 8;
   if (value_len > len - 8) value_len = len - 8;
   static char name[48];
   Copy_Value(name, sizeof(name), data + 8, value_len);
+  if (uid == missed_uid) {
+    Changed([](Phone_State &s) { strlcpy(s.missed_caller, name, sizeof(s.missed_caller)); });
+    LOG("PHONE: missed call from \"%s\"\r\n", name);
+    return;
+  }
   Changed([](Phone_State &s) { strlcpy(s.caller, name, sizeof(s.caller)); });
   LOG("PHONE: caller \"%s\"\r\n", name);
 }
@@ -213,6 +234,18 @@ static void Worker(void *)
   remote_command = NULL;
   worker = NULL;
   vTaskDelete(NULL);
+}
+
+void Phone_Notify_Clear_Missed(void)
+{
+  Changed([](Phone_State &s) { s.missed_call = false; });
+}
+
+void Phone_Notify_Fake_Missed(const char *name)
+{
+  static char copy[48];
+  strlcpy(copy, name, sizeof(copy));
+  Changed([](Phone_State &s) { s.missed_call = true; strlcpy(s.missed_caller, copy, sizeof(s.missed_caller)); });
 }
 
 void Phone_Notify_Connected(const esp_bd_addr_t remote)

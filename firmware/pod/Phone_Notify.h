@@ -13,6 +13,8 @@ struct Phone_State {
   uint32_t version;         // goes up whenever anything below changes
   bool call_ringing;
   char caller[48];          // UTF-8, as iOS gives it (contact name or number)
+  bool missed_call;         // a call was missed (until tapped on the pod or cleared on the phone)
+  char missed_caller[48];
   bool media_playing;
   char title[64];
   char artist[48];
@@ -31,8 +33,12 @@ void Phone_Notify_Disconnected(void);
 enum Media_Command { MEDIA_TOGGLE = 2, MEDIA_NEXT = 3, MEDIA_PREVIOUS = 4 };
 void Phone_Notify_Media_Command(Media_Command command);
 
+// The rider has seen the missed call (tapped its icon)
+void Phone_Notify_Clear_Missed(void);
+
 // Testing without a phone (serial "fakecall" / "fakemusic")
 void Phone_Notify_Fake_Call(const char *name);               // "" = call over
+void Phone_Notify_Fake_Missed(const char *name);             // serial "fakemissed Name"
 void Phone_Notify_Fake_Music(const char *title, const char *artist, bool playing);
 
 // Main loop: the latest state (copied)
