@@ -43,8 +43,6 @@ final class Navigator {
     private(set) var navState: NavigationState?
     /// Voice guidance: muted unless the rider turned it on (the choice is remembered)
     private(set) var isMuted = UserDefaults.standard.object(forKey: "voiceMuted") as? Bool ?? true
-    /// Stops the automatic pod updates, e.g. while the manual "Pod test" sheet is open
-    @ObservationIgnored var podFeedPaused = false
     /// Replay routes with fake GPS instead of following the phone (set in the Pod & testing sheet).
     /// On at launch in development (Debug) builds, as asked while the app is being built; off in
     /// release builds, so a real ride never starts as a simulation by mistake.
@@ -635,7 +633,7 @@ final class Navigator {
     /// Route drawings go at most 4 times a second so a fast simulation can't flood the link.
     /// A whole map area: ~100-250 lines, sent once per area (and again after a reconnect)
     private func sendMapArea(_ lines: [String]) {
-        guard !podFeedPaused, link.state == .connected else { return }
+        guard link.state == .connected else { return }
         // MAPBEGIN (the area's reference point) goes with the live lines: poses and the route switch
         // to the new area's frame at once, and the pod can't place them without it. Queued in bulk
         // behind them, it came late and the pod's arrow left the route at bends for a moment.
@@ -644,7 +642,6 @@ final class Navigator {
     }
 
     private func updatePod() {
-        guard !podFeedPaused else { return }
         if phase == .navigating, !mapFeed.areaLines.isEmpty, mapSentForConnection != link.connectionID {
             sendMapArea(mapFeed.areaLines)          // the pod reconnected (or restarted): it has no map
         }

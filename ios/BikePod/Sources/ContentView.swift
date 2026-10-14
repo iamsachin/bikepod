@@ -114,9 +114,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showPodTest) {
-            PodTestView(link: link, navigator: navigator)
-                .onAppear { navigator.podFeedPaused = true }
-                .onDisappear { navigator.podFeedPaused = false }
+            SettingsView(link: link, navigator: navigator)
         }
         .sheet(isPresented: $showRides) {
             RidesView(history: navigator.history)

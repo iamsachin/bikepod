@@ -3,16 +3,8 @@ import Foundation
 import Observation
 
 /// Turn direction, encoded as the first letter of the pod message.
-enum TurnDir: String, CaseIterable, Identifiable {
+enum TurnDir: String {
     case left = "L", right = "R", straight = "S"
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .left: "Left"
-        case .right: "Right"
-        case .straight: "Straight"
-        }
-    }
 }
 
 /// Bluetooth LE link to the handlebar pod (see firmware/pod/BLE_Link.h).
@@ -62,10 +54,6 @@ final class PodLink: NSObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
-    }
-
-    func send(_ dir: TurnDir, metres: Int, road: String) {
-        send(line: "\(dir.rawValue)|\(max(0, metres))|\(road)")
     }
 
     /// How urgent a line is. Live lines (turn, pose, route...) always go before bulk ones (map areas),

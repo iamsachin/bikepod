@@ -10,7 +10,6 @@
 		11C7FA4B115A56CAE38983C7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 18C967811A9A21CAD1C811A8 /* Assets.xcassets */; };
 		1A6A4EE15443E9A14DE7067D /* MapLibreSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B6B1006D993BC2E018E2A9E3 /* MapLibreSwiftUI */; };
 		209543603BFE68B8710630C5 /* RouteLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B34CF55DF8CE23B787F5A8C /* RouteLayer.swift */; };
-		241ABC5802481155CF537CBE /* PodTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54648A52B85CD664DD5BF890 /* PodTestView.swift */; };
 		29C0206A1541FE58F0C48391 /* FerrostarSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 11B0FB91CB22076E7A5373DD /* FerrostarSwiftUI */; };
 		3308C03BC3521403293E51D4 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA73689CA7E059E4291E0E5 /* Keychain.swift */; };
 		3BB44CF013A9021A6F58DE89 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = B5499E7E8A6ECA3E97FD309B /* MapLibre */; };
@@ -25,6 +24,7 @@
 		76720AB393B2DCA1E5914A7E /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B462DF9A1737F4ABB6561F25 /* TripLiveActivity.swift */; };
 		7746313D92F6721C72934A14 /* FerrostarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8CBCE9D6044DF1591B825BE0 /* FerrostarCore */; };
 		89BCBD750A12B4F9B4086B6D /* PathShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16B1117B4E5FF5B1D498373 /* PathShape.swift */; };
+		902EFB1D2A18D7F24C8694CF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5D90407BB5B2ED7CA984F4 /* SettingsView.swift */; };
 		9521D3ACF80892BE3342B182 /* AlbumArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242CE5D8FB798EE0305B1BD2 /* AlbumArt.swift */; };
 		98470BEA77A833DB4085DA1B /* RoutePuck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74D8E66DB2B4F43D12555384 /* RoutePuck.swift */; };
 		986E97582A2FA574DDA76FD3 /* MapArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C76E28EF65BA10A60CC07C /* MapArea.swift */; };
@@ -81,7 +81,6 @@
 		3E7CAD9EC0062A704B4CF9B3 /* TripActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivity.swift; sourceTree = "<group>"; };
 		44C76E28EF65BA10A60CC07C /* MapArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapArea.swift; sourceTree = "<group>"; };
 		4D32D75FC30ABD5E15E9AEE2 /* BikePod.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BikePod.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		54648A52B85CD664DD5BF890 /* PodTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodTestView.swift; sourceTree = "<group>"; };
 		585B95CFF9135FAA348D038D /* Weather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Weather.swift; sourceTree = "<group>"; };
 		5B34CF55DF8CE23B787F5A8C /* RouteLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteLayer.swift; sourceTree = "<group>"; };
 		74D8E66DB2B4F43D12555384 /* RoutePuck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePuck.swift; sourceTree = "<group>"; };
@@ -93,6 +92,7 @@
 		9EA73689CA7E059E4291E0E5 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A4BB383C277F9ADFF7C9CC05 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A5E27F085223AA78E91B5373 /* TripActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityController.swift; sourceTree = "<group>"; };
+		AB5D90407BB5B2ED7CA984F4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B462DF9A1737F4ABB6561F25 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
 		CD9D006E312984F5993A20B2 /* BikePodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikePodWidgets.swift; sourceTree = "<group>"; };
 		DF8B8E3DEB099F516B18C47F /* VectorTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorTile.swift; sourceTree = "<group>"; };
@@ -136,11 +136,11 @@
 				E16B1117B4E5FF5B1D498373 /* PathShape.swift */,
 				8B61F927C42D36550F5A67F6 /* PlaceSearch.swift */,
 				221E8EB08715D6EDAC24B568 /* PodLink.swift */,
-				54648A52B85CD664DD5BF890 /* PodTestView.swift */,
 				30892712A10AC358D6773CD6 /* RideHistory.swift */,
 				1C92ADD0D9B5BC0859C192C5 /* RidesView.swift */,
 				5B34CF55DF8CE23B787F5A8C /* RouteLayer.swift */,
 				74D8E66DB2B4F43D12555384 /* RoutePuck.swift */,
+				AB5D90407BB5B2ED7CA984F4 /* SettingsView.swift */,
 				F62A27F92695E5849DA78ECB /* Sun.swift */,
 				A5E27F085223AA78E91B5373 /* TripActivityController.swift */,
 				DF8B8E3DEB099F516B18C47F /* VectorTile.swift */,
@@ -317,11 +317,11 @@
 				89BCBD750A12B4F9B4086B6D /* PathShape.swift in Sources */,
 				4BCFA7A2EB574171618DEC2B /* PlaceSearch.swift in Sources */,
 				B7D0CEA0FBE10E49594B36EB /* PodLink.swift in Sources */,
-				241ABC5802481155CF537CBE /* PodTestView.swift in Sources */,
 				D24BDA21EFED6C229DA354D8 /* RideHistory.swift in Sources */,
 				6A55083AA5A0A852459455E1 /* RidesView.swift in Sources */,
 				209543603BFE68B8710630C5 /* RouteLayer.swift in Sources */,
 				98470BEA77A833DB4085DA1B /* RoutePuck.swift in Sources */,
+				902EFB1D2A18D7F24C8694CF /* SettingsView.swift in Sources */,
 				A678246EB7AD01BD7C79419C /* Sun.swift in Sources */,
 				5A3B5CEC33F1348ABBB49146 /* TripActivity.swift in Sources */,
 				A958E86AC87600D124112C8D /* TripActivityController.swift in Sources */,
