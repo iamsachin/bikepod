@@ -13,3 +13,6 @@ xcuserdata/
 # Python environment and captured screenshots for tools/
 tools/.venv/
 tools/screenshots/
+
+# Personal project notes (kept locally, not in git)
+PROJECT.md
