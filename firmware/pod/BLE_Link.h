@@ -5,6 +5,7 @@
 // Phone -> pod over Bluetooth LE.
 // The phone writes one UTF-8 line at a time to the "Nav" characteristic:
 //   L|400|MG Rd               next turn: L = left, R = right, S = straight, metres, road name
+//                             (U / V = U-turn swinging right / left)
 //   O|250|4|271|Hosur Rd      roundabout: metres, exit number (0 = unknown), degrees round to the
 //                             exit (+ clockwise, as in India; - anticlockwise), road name
 //   TRIP|18:42|6.0|7.3|1440   arrival time, kilometres left, the route's total km, seconds riding
