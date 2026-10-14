@@ -433,11 +433,12 @@ struct ContentView: View {
     }
 
     /// A camera showing `box` in the clear space between the search box (top ~170 pt) and the
-    /// route card (bottom ~390 pt). Worked out directly: a fitted bounding box gets Ferrostar's own
+    /// route card with the BikePod pill (bottom ~440 pt). Worked out directly: a fitted bounding box gets Ferrostar's own
     /// "showcase" margins on top of ours, and the routes came out either tiny or under the card.
     static func previewCamera(_ box: MLNCoordinateBounds) -> MapViewCamera {
         let screen = UIScreen.main.bounds.size
-        let clear = (top: 170.0, bottom: screen.height - 390, left: 40.0, right: screen.width - 40)
+        // (bottom: above the route card and the BikePod pill over it)
+        let clear = (top: 170.0, bottom: screen.height - 440, left: 40.0, right: screen.width - 40)
         let lat = (box.sw.latitude + box.ne.latitude) / 2, lng = (box.sw.longitude + box.ne.longitude) / 2
         let metresWide = (box.ne.longitude - box.sw.longitude) * 111_320 * cos(lat * .pi / 180)
         let metresTall = (box.ne.latitude - box.sw.latitude) * 110_540

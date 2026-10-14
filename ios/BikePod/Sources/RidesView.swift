@@ -80,6 +80,9 @@ struct RideDetailView: View {
                     .frame(height: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 18))
                 VStack(alignment: .leading, spacing: 4) {
+                    // In full here: the title bar cuts long names short
+                    Text(ride.title).font(.title3.weight(.semibold)).lineLimit(3)
+                        .padding(.bottom, 2)
                     Text(ride.start, format: .dateTime.weekday(.wide).day().month(.wide).year())
                         .font(.subheadline).foregroundStyle(.secondary)
                     Text("\(ride.start.formatted(date: .omitted, time: .shortened)) – \(ride.end.formatted(date: .omitted, time: .shortened))")

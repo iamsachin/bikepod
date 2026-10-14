@@ -227,11 +227,13 @@ final class Navigator {
                                      kind: .break)]
             )
             guard routeRequestID == requestID else { return }   // cancelled or replaced meanwhile
-            guard let route = routes.first else {
+            // Fastest first (and chosen): Valhalla lists its own pick first, not always the quickest
+            let options = routes.prefix(3).sorted { $0.steps.reduce(0) { $0 + $1.duration } < $1.steps.reduce(0) { $0 + $1.duration } }
+            guard let route = options.first else {
                 phase = .failed("No route found to that destination.")
                 return
             }
-            routeOptions = Array(routes.prefix(3))
+            routeOptions = options
             phase = .preview(route)
             DebugLog.write(String(format: "PLAN from %.6f,%.6f (acc %.0f m); route starts %.6f,%.6f",
                                   origin.coordinates.lat, origin.coordinates.lng, origin.horizontalAccuracy,
