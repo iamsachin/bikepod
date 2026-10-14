@@ -196,7 +196,9 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     msg->kind = MSG_ARRIVED;
     msg->km = Field(text, 1).toFloat();
     msg->trip_min = Field(text, 2).toInt();
-    Copy_Text(Rest_Ptr(text, 3), msg->text, sizeof(msg->text));
+    msg->avg_kmh = Field(text, 3).toFloat();
+    msg->top_kmh = Field(text, 4).toFloat();
+    Copy_Text(Rest_Ptr(text, 5), msg->text, sizeof(msg->text));
     return true;
   }
   if (kind == "CRUISE") {

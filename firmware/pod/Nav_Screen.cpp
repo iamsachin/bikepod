@@ -16,6 +16,7 @@ LV_IMG_DECLARE(app_icon);
 #include <math.h>
 #include <string.h>
 #include "Smooth_Arc.h"
+#include "Lean_Screen.h"
 
 LV_FONT_DECLARE(font_big_104);    // Barlow Bold, digits and "." only
 LV_FONT_DECLARE(font_title_44);   // Barlow SemiBold, ASCII + middle dot
@@ -29,6 +30,7 @@ LV_FONT_DECLARE(font_small_26);   // Barlow SemiBold, ASCII + middle dot
 #define COLOR_AMBER     lv_color_hex(0xF5B83D)
 #define COLOR_RED       lv_color_hex(0xE5484D)
 
+#define DEGREE          "\xC2\xB0"
 #define MIDDLE_DOT      "\xC2\xB7"
 
 #define RING_SIZE       462
@@ -61,6 +63,8 @@ static lv_obj_t *stale_veil;
 static lv_obj_t *dbg_glow, *dbg_area, *dbg_marker;   // for serial test commands      // semi-transparent black over everything when the link goes quiet
 
 static lv_obj_t *info_group;      // waiting / rerouting / arrived / cruise
+static lv_obj_t *summary_grid;    // arrived: the ride's numbers
+static lv_obj_t *sum_avg, *sum_top, *sum_lean, *sum_g;
 static lv_obj_t *icon_app;        // the app's icon, on "Waiting for phone"
 static lv_obj_t *icon_target;
 static lv_obj_t *icon_reroute;
@@ -550,6 +554,7 @@ static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv
   Show_If(info_top, top[0]);
   Show_If(info_sub, sub[0]);
   Show_If(info_detail, detail[0]);
+  Show_If(summary_grid, icon == icon_target);
 }
 
 /********************************** Soft edges **********************************/
@@ -651,6 +656,27 @@ void Nav_Screen_Create(void)
   lv_label_set_long_mode(info_sub, LV_LABEL_LONG_DOT);
   info_detail = Label_Create(info_group, &font_text_32, COLOR_SOFT);
 
+  // Ride summary (Arrived): two rows of value over caption
+  summary_grid = Plain_Box(info_group, 330, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(summary_grid, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(summary_grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+  lv_obj_set_style_pad_row(summary_grid, 10, 0);
+  lv_obj_set_style_pad_top(summary_grid, 14, 0);
+  auto stat = [](const char *caption) {
+    lv_obj_t *cell = Plain_Box(summary_grid, 160, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *value = Label_Create(cell, &font_text_32, COLOR_TEXT);
+    lv_obj_t *cap = Label_Create(cell, &font_small_26, COLOR_GREY);
+    lv_label_set_text(cap, caption);
+    return value;
+  };
+  sum_avg = stat("AVG km/h");
+  sum_top = stat("TOP km/h");
+  sum_lean = stat("LEAN L " MIDDLE_DOT " R");
+  sum_g = stat("PEAK g");
+  lv_obj_add_flag(summary_grid, LV_OBJ_FLAG_HIDDEN);
+
   // The map band's edge fade would otherwise paint over the ring where they overlap
   lv_obj_move_foreground(ring);
   lv_obj_move_foreground(spinner);
@@ -684,7 +710,7 @@ void Nav_Screen_Show_Rerouting(const char *detail)
   Set_Info(icon_reroute, "", "Rerouting", &font_title_44, detail && detail[0] ? detail : "Finding a new route", "");
 }
 
-void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, const char *place)
+void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, float avg_kmh, float top_kmh, const char *place)
 {
   char summary[40];
   snprintf(summary, sizeof(summary), "%.1f km " MIDDLE_DOT " %lu min", trip_km, (unsigned long)trip_min);
@@ -693,6 +719,18 @@ void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, const char *place
     Set_Mode(MODE_ARRIVED);
     Ring_Set_Fixed(1000);
   }
+  // The ride summary: speeds from the phone, lean and g from the pod's own sensor
+  char text[24];
+  float lean_l, lean_r, peak_g;
+  Ride_Peaks_Get(&lean_l, &lean_r, &peak_g);
+  if (avg_kmh > 0) snprintf(text, sizeof(text), "%d", (int)lroundf(avg_kmh)); else strcpy(text, "-");
+  Set_Text(sum_avg, text);
+  if (top_kmh > 0) snprintf(text, sizeof(text), "%d", (int)lroundf(top_kmh)); else strcpy(text, "-");
+  Set_Text(sum_top, text);
+  snprintf(text, sizeof(text), "%d" DEGREE " " MIDDLE_DOT " %d" DEGREE, (int)lroundf(lean_l), (int)lroundf(lean_r));
+  Set_Text(sum_lean, text);
+  snprintf(text, sizeof(text), "%.2f", peak_g);
+  Set_Text(sum_g, text);
   Set_Info(icon_target, "", "Arrived", &font_title_44, place, summary);
 }
 
@@ -716,6 +754,7 @@ void Nav_Screen_Set_Trip(const char *eta, float km_left)
   Settings_Format_Clock(eta, clock, sizeof(clock));
   snprintf(eta_text, sizeof(eta_text), "%s " MIDDLE_DOT " %.1f km", clock, km_left);
   if (bump_m == 0) Set_Text(eta_label, eta_text);       // a breaker warning has the line for now
+  if (!have_trip) Ride_Peaks_Reset();                   // a trip is starting: its own summary
   have_trip = true;
   Show_If(eta_label, mode == MODE_TURN || mode == MODE_REROUTING);
 }

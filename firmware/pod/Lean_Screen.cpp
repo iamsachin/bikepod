@@ -91,6 +91,8 @@ static float lon_lp = 0, lon_offset = 0;              // forward reading smoothe
 static float gps_accel = 0;                           // g, from the phone's speed changes
 static uint32_t gps_accel_ms = 0;
 static float peak_accel = 0, peak_decel = 0, peak_lat_l = 0, peak_lat_r = 0;
+// This trip's peaks, for the ride summary at arrival (reset when a trip starts)
+static float ride_lean_l = 0, ride_lean_r = 0, ride_g = 0;
 static float motion_hist_lat[MOTION_HISTORY], motion_hist_lon[MOTION_HISTORY];
 static uint8_t motion_head = 0;
 static float graph_lean = 0;      // lean filtered for the graph (~0.5 s), so it draws as a smooth curve
@@ -213,7 +215,12 @@ static void Sample(lv_timer_t *timer)
   float truth = gps_fresh ? gps_accel : 0;             // stopped (or no phone): not accelerating
   lon_offset += ((lon_lp - truth) - lon_offset) * fminf(1, dt / (gps_fresh ? 4.0f : 1.0f));
   motion_lon = lon_lp - lon_offset;
+  if (v > MOVING_MPS) {                                // lean only means something on the move
+    ride_lean_r = fmaxf(ride_lean_r, lean);
+    ride_lean_l = fmaxf(ride_lean_l, -lean);
+  }
   if (v > 1.0f) {                                      // peaks only while riding
+    ride_g = fmaxf(ride_g, fmaxf(fabsf(motion_lon), fabsf(motion_lat)));
     peak_accel = fmaxf(peak_accel, motion_lon);
     peak_decel = fminf(peak_decel, motion_lon);
     peak_lat_r = fmaxf(peak_lat_r, motion_lat);
@@ -256,6 +263,18 @@ void Motion_Fake(bool on, float lat, float lon)
   motion_faked = on;
   fake_lat = lat;
   fake_lon = lon;
+}
+
+void Ride_Peaks_Reset(void)
+{
+  ride_lean_l = ride_lean_r = ride_g = 0;
+}
+
+void Ride_Peaks_Get(float *lean_left, float *lean_right, float *peak_g)
+{
+  *lean_left = ride_lean_l;
+  *lean_right = ride_lean_r;
+  *peak_g = ride_g;
 }
 
 void Motion_Get(Motion *out)

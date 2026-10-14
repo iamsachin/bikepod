@@ -71,7 +71,7 @@ static void Pod_Tick(lv_timer_t *timer)
       case MSG_TIME:    Clock_Set(msg.elapsed_s / 3600, msg.elapsed_s / 60 % 60, msg.elapsed_s % 60); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(msg.text); break;
-      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.text); Journey_Clear(); break;
+      case MSG_ARRIVED: Nav_Screen_Show_Arrived(msg.km, msg.trip_min, msg.avg_kmh, msg.top_kmh, msg.text); Journey_Clear(); break;
       case MSG_CRUISE:  Nav_Screen_Show_Cruise(msg.speed_kmh, msg.clock); Journey_Clear(); break;
     }
   }

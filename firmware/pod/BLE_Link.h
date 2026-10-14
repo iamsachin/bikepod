@@ -23,7 +23,7 @@
 //                             where it is: area 7, x 120, y -40 metres (the map draws a line to it)
 //   TIME|16|32|05             the phone's local time (sets the pod's clock)
 //   REROUTE|detail            off route, a new route is being fetched ("Finding a new route" / "No internet")
-//   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination
+//   ARRIVED|7.3|29|24|58|Cafe trip finished: km, minutes, average and top km/h (0 = unknown), destination
 //   CRUISE|42|21:35           connected but not navigating: speed in km/h, local time
 // The phone repeats its current lines every ~2 s so the pod can spot a silent link.
 #define POD_BLE_NAME          "BikePod"
@@ -56,6 +56,7 @@ struct Nav_Message {
   uint32_t elapsed_s;       // TRIP: seconds since the start
   // MSG_ARRIVED
   uint32_t trip_min;
+  float avg_kmh, top_kmh;   // the ride's average (moving) and top speed, 0 = unknown
   // MSG_CRUISE
   uint32_t speed_kmh;
   // MSG_SPEED

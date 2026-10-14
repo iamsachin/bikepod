@@ -64,6 +64,7 @@ final class Navigator {
     /// Past rides; the one in progress is recorded as it goes
     let history = RideHistory()
     @ObservationIgnored private var recorder: RideRecorder?
+    @ObservationIgnored private var arrivedRide: Ride?
 
     /// Updated as fixes arrive (reading the provider directly didn't refresh the screen)
     private(set) var hasGPS = false
@@ -249,6 +250,7 @@ final class Navigator {
             tripKm = route.distance / 1000
             lastTrip = nil
             recorder = RideRecorder(destination: destinationName, simulated: simulate)
+            arrivedRide = nil
             simulating = simulate
             simulatedSpeed = 0
             lastSimulated = nil
@@ -323,7 +325,9 @@ final class Navigator {
         if case .complete = state.tripState {
             if phase != .arrived {
                 // The distance actually ridden (detours included), else the route's
-                let ridden = finishRide(arrived: true)?.km ?? 0
+                let ride = finishRide(arrived: true)
+                arrivedRide = ride
+                let ridden = ride?.km ?? 0
                 lastTrip = (ridden > 0 ? ridden : tripKm, Date().timeIntervalSince(tripStartedAt))
             }
             phase = .arrived
@@ -518,7 +522,9 @@ final class Navigator {
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
             let place = Self.podText(destinationName)
-            return [("state", String(format: "ARRIVED|%.1f|%d|", tripKm, minutes) + place)]
+            // Average (moving) and top speed for the pod's ride summary (0 = not known)
+            let avg = arrivedRide?.averageKmh ?? 0, top = arrivedRide?.topSpeedKmh ?? 0
+            return [("state", String(format: "ARRIVED|%.1f|%d|%.0f|%.0f|", lastTrip?.km ?? tripKm, minutes, avg, top) + place)]
         case .idle, .routing, .preview, .failed:
             let metresPerSecond = max(0, device?.lastLocation?.speed?.value ?? 0)
             let speed = Int((metresPerSecond * 3.6).rounded())

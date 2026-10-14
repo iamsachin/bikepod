@@ -34,3 +34,8 @@ struct Motion {
 void Motion_Get(Motion *out);
 // Testing (serial "gfake -0.4 0.3": lateral, longitudinal; "gfake" alone = real readings)
 void Motion_Fake(bool on, float lat, float lon);
+
+// The current trip's deepest lean each side and highest g (any direction), for the ride summary;
+// reset when a trip starts
+void Ride_Peaks_Reset(void);
+void Ride_Peaks_Get(float *lean_left, float *lean_right, float *peak_g);
