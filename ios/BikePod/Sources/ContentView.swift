@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var camera: MapViewCamera = .trackUserLocation(zoom: 14)
     @State private var showPodTest = false
     @State private var showRides = false
+    @State private var previewFitted = false      // the map is fitted to the routes once per plan
     /// Feeds the navigation map the navigator's arrow placement (see RoutePuck)
     @State private var puckManager = RoutePuckLocationManager()
     @FocusState private var searchFocused: Bool
@@ -53,6 +54,11 @@ struct ContentView: View {
             onTapExit: { stopNavigation() }
         ) {
             if case let .preview(route) = navigator.phase {
+                // The other routes found, grey, under the chosen one
+                for (i, option) in navigator.routeOptions.enumerated() where option != route {
+                    RouteLayer(polyline: MLNPolylineFeature(coordinates: option.geometry.map(\.clLocationCoordinate2D)),
+                               identifier: "preview-option-\(i)", color: .systemGray2, casingColor: .white, below: routeAnchor)
+                }
                 RouteLayer(polyline: MLNPolylineFeature(coordinates: route.geometry.map(\.clLocationCoordinate2D)),
                            identifier: "preview-route", color: .systemBlue, casingColor: .white, below: routeAnchor)
             }
@@ -116,10 +122,11 @@ struct ContentView: View {
             RidesView(history: navigator.history)
         }
         .onChange(of: navigator.phase) { _, phase in
-            if case let .preview(route) = phase {
-                camera = .boundingBox(route.mapBounds,
-                                      edgePadding: UIEdgeInsets(top: 190, left: 40, bottom: 300, right: 40))
+            if case .preview = phase, !previewFitted {
+                previewFitted = true
+                camera = Self.previewCamera(Route.bounds(of: navigator.routeOptions))
             }
+            if case .preview = phase {} else { previewFitted = false }
             // Show where you arrived. Following the location instead jumped back to the start after
             // a simulated ride (its fake GPS stops at the end and the real position takes over)
             if phase == .arrived, let destination {
@@ -403,6 +410,9 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("Cancel route")
                 }
+                if navigator.routeOptions.count > 1 {
+                    routeChoices(selected: route)
+                }
                 if navigator.willSimulate {
                     Label(navigator.routeStartsElsewhere
                           ? "Starts away from you, so the ride will be simulated"
@@ -420,6 +430,55 @@ struct ContentView: View {
                 .controlSize(.large)
                 Text("Routes by Valhalla · Map data © OpenStreetMap contributors")
                     .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// A camera showing `box` in the clear space between the search box (top ~170 pt) and the
+    /// route card (bottom ~390 pt). Worked out directly: a fitted bounding box gets Ferrostar's own
+    /// "showcase" margins on top of ours, and the routes came out either tiny or under the card.
+    static func previewCamera(_ box: MLNCoordinateBounds) -> MapViewCamera {
+        let screen = UIScreen.main.bounds.size
+        let clear = (top: 170.0, bottom: screen.height - 390, left: 40.0, right: screen.width - 40)
+        let lat = (box.sw.latitude + box.ne.latitude) / 2, lng = (box.sw.longitude + box.ne.longitude) / 2
+        let metresWide = (box.ne.longitude - box.sw.longitude) * 111_320 * cos(lat * .pi / 180)
+        let metresTall = (box.ne.latitude - box.sw.latitude) * 110_540
+        // MapLibre: at zoom z the world is 512 x 2^z points round
+        let world = 40_075_016.686 * cos(lat * .pi / 180)
+        let scale = min((clear.right - clear.left) / max(metresWide, 50), (clear.bottom - clear.top) / max(metresTall, 50))
+        let zoom = min(max(log2(scale * world / 512), 3), 17)
+        // The map centres its picture between the safe areas; move it so the box's centre lands in
+        // the middle of the clear space instead
+        let metresPerPoint = world / (512 * pow(2, zoom))
+        let mapCentreY = screen.height / 2 + 14         // (top safe area 62 - bottom 34) / 2
+        let wantedY = (clear.top + clear.bottom) / 2
+        let shiftedLat = lat - (mapCentreY - wantedY) * metresPerPoint / 110_540
+        return .center(CLLocationCoordinate2D(latitude: shiftedLat, longitude: lng), zoom: zoom)
+    }
+
+    /// One button per route found: time and distance, and how much longer than the fastest
+    private func routeChoices(selected: Route) -> some View {
+        let fastest = navigator.routeOptions.map(\.durationSeconds).min() ?? 0
+        return HStack(spacing: 8) {
+            ForEach(Array(navigator.routeOptions.enumerated()), id: \.offset) { _, option in
+                let chosen = option == selected
+                let extra = Int(((option.durationSeconds - fastest) / 60).rounded())
+                Button { navigator.selectRoute(option) } label: {
+                    VStack(spacing: 2) {
+                        Text(option.durationText).font(.subheadline.weight(.semibold))
+                        Text(extra > 0 ? "\(option.distanceText) · +\(extra) min" : option.distanceText)
+                            .font(.caption)
+                            .foregroundStyle(chosen ? Color.white.opacity(0.85) : .secondary)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(chosen ? .white : .primary)
+                    .background(chosen ? Color.blue : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Route \(option.durationText), \(option.distanceText)\(chosen ? ", chosen" : "")")
             }
         }
     }
@@ -582,8 +641,17 @@ struct ContentView: View {
 }
 
 private extension Route {
-    var mapBounds: MLNCoordinateBounds {
-        MLNCoordinateBounds(sw: bbox.sw.clLocationCoordinate2D, ne: bbox.ne.clLocationCoordinate2D)
+    /// The box around several routes
+    static func bounds(of routes: [Route]) -> MLNCoordinateBounds {
+        guard let first = routes.first else { return MLNCoordinateBounds() }
+        var sw = first.bbox.sw.clLocationCoordinate2D, ne = first.bbox.ne.clLocationCoordinate2D
+        for route in routes.dropFirst() {
+            sw.latitude = min(sw.latitude, route.bbox.sw.lat)
+            sw.longitude = min(sw.longitude, route.bbox.sw.lng)
+            ne.latitude = max(ne.latitude, route.bbox.ne.lat)
+            ne.longitude = max(ne.longitude, route.bbox.ne.lng)
+        }
+        return MLNCoordinateBounds(sw: sw, ne: ne)
     }
 
     var durationSeconds: TimeInterval { steps.reduce(0) { $0 + $1.duration } }

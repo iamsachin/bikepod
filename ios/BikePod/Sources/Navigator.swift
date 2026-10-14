@@ -27,6 +27,9 @@ final class Navigator {
 
     private(set) var phase: Phase = .idle
     private(set) var destinationName = ""
+    /// The routes found for the destination (fastest first, up to 3): the preview shows them all
+    /// and the rider picks one; `phase` holds the chosen one
+    private(set) var routeOptions: [Route] = []
     /// True when the previewed route starts somewhere other than the rider (chosen in the app):
     /// such a route can only be simulated, since real guidance follows the phone's own GPS.
     private(set) var routeStartsElsewhere = false
@@ -164,9 +167,12 @@ final class Navigator {
         snappedLocationCourseFiltering: .snapToRoute
     )
 
-    private func makeCore(_ provider: LocationProviding) throws -> FerrostarCore {
-        try FerrostarCore(
-            wellKnownRouteProvider: .valhalla(endpointUrl: Self.valhallaURL, profile: "motorcycle"),
+    /// - Parameter alternates: also ask for up to 2 other routes (planning only: reroutes take the best)
+    private func makeCore(_ provider: LocationProviding, alternates: Bool = false) throws -> FerrostarCore {
+        var routes = WellKnownRouteProvider.valhalla(endpointUrl: Self.valhallaURL, profile: "motorcycle")
+        if alternates { routes = try routes.withJsonOptions(options: ["alternates": 2]) }
+        return try FerrostarCore(
+            wellKnownRouteProvider: routes,
             locationProvider: provider,
             navigationControllerConfig: Self.config,
             networkSession: junctionCapture
@@ -192,7 +198,7 @@ final class Navigator {
         let requestID = UUID()
         routeRequestID = requestID
         do {
-            let router = try makeCore(device ?? simulated)   // only asks for routes: no GPS needed
+            let router = try makeCore(device ?? simulated, alternates: true)   // only asks for routes: no GPS needed
             let routes = try await router.getRoutes(
                 initialLocation: origin,
                 waypoints: [Waypoint(coordinate: GeographicCoordinate(lat: destination.latitude,
@@ -204,6 +210,7 @@ final class Navigator {
                 phase = .failed("No route found to that destination.")
                 return
             }
+            routeOptions = Array(routes.prefix(3))
             phase = .preview(route)
             DebugLog.write(String(format: "PLAN from %.6f,%.6f (acc %.0f m); route starts %.6f,%.6f",
                                   origin.coordinates.lat, origin.coordinates.lng, origin.horizontalAccuracy,
@@ -215,6 +222,12 @@ final class Navigator {
             guard routeRequestID == requestID else { return }
             phase = .failed(Self.friendlyMessage(error))
         }
+    }
+
+    /// Picks one of the routes found (the preview shows it as the chosen one)
+    func selectRoute(_ route: Route) {
+        guard case .preview = phase, routeOptions.contains(route) else { return }
+        phase = .preview(route)
     }
 
     /// True when starting the previewed route would replay it instead of following the GPS
@@ -300,6 +313,7 @@ final class Navigator {
         simulating = false
         simulatedSpeed = 0
         lastSimulated = nil
+        routeOptions = []
         if phase != .idle { phase = .idle }
         updatePod()
     }
