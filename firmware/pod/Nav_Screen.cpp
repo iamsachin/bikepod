@@ -15,6 +15,7 @@ LV_IMG_DECLARE(app_icon);
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include "Smooth_Arc.h"
 
 LV_FONT_DECLARE(font_big_104);    // Barlow Bold, digits and "." only
 LV_FONT_DECLARE(font_title_44);   // Barlow SemiBold, ASCII + middle dot
@@ -120,14 +121,12 @@ static void Show_If(lv_obj_t *obj, bool show)
 /******************************** Smooth progress ring ********************************
  * Updates arrive roughly once per GPS fix, at uneven intervals. Instead of jumping (or
  * restarting an animation each time), the ring keeps moving at the measured speed between
- * updates and eases towards each new value. LVGL 8 draws arcs in whole degrees (about 4 px at
- * this radius), so a round dot drawn at the exact tip position hides those 4 px steps.
+ * updates and eases towards each new value. Drawn by Smooth_Arc (anti-aliased, any angle).
  ***************************************************************************************/
 #define RING_FRAME_MS     16                          // ~60 fps
 #define RING_RADIUS       ((RING_SIZE - RING_WIDTH) / 2)  // centre line of the ring
 #define RING_MAX_COAST_MS 1500                        // stop predicting if updates stop
 
-static lv_obj_t *ring_tip;
 static float ring_target = 0;     // last value received (0..1000)
 static float ring_rate = 0;       // measured speed, units per ms
 static float ring_shown = 0;      // value currently drawn
@@ -135,18 +134,7 @@ static uint32_t ring_target_ms = 0;
 
 static void Ring_Draw(float value)
 {
-  int32_t deg = (int32_t)(value * 360.0f / 1000.0f);   // whole degrees, always behind the tip
-  lv_arc_set_value(ring, deg);
-
-  if (value <= 0) {
-    lv_obj_add_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
-  float rad = value / 1000.0f * 2.0f * (float)M_PI;     // 0 = 12 o'clock, clockwise
-  lv_obj_clear_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_align(ring_tip, LV_ALIGN_CENTER,
-               (lv_coord_t)lroundf(RING_RADIUS * sinf(rad)),
-               (lv_coord_t)lroundf(-RING_RADIUS * cosf(rad)));
+  Smooth_Arc_Set(ring, 0, value * 360.0f / 1000.0f);   // from 12 o'clock, clockwise
 }
 
 static void Ring_Frame(lv_timer_t *timer)
@@ -195,7 +183,7 @@ static void Spinner_Tick(lv_timer_t *timer)
 {
   static int16_t start = 0;
   start = (start + 8) % 360;                  // one turn every ~1.4 s
-  lv_arc_set_angles(spinner, start, start + 70);
+  Smooth_Arc_Set(spinner, start, 70);
 }
 
 /********************************* Waiting clock *********************************/
@@ -564,21 +552,6 @@ static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv
   Show_If(info_detail, detail[0]);
 }
 
-static lv_obj_t *Edge_Arc(lv_obj_t *parent, lv_color_t color)
-{
-  lv_obj_t *arc = lv_arc_create(parent);
-  lv_obj_set_size(arc, RING_SIZE, RING_SIZE);
-  lv_obj_center(arc);
-  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_pad_all(arc, 0, 0);
-  lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);     // no track, just the indicator
-  lv_obj_set_style_arc_width(arc, RING_WIDTH, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
-  lv_arc_set_bg_angles(arc, 0, 360);
-  return arc;
-}
-
 /********************************** Soft edges **********************************/
 // The map fades into black at the screen's rim and towards the text above and below,
 // through an alpha-only image laid over it (LVGL can't blur live; a fixed fade looks the same).
@@ -604,19 +577,11 @@ void Nav_Screen_Create(void)
   lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
   // Thin progress ring near the edge: starts at 12 o'clock and fills clockwise
-  ring = Edge_Arc(scr, COLOR_BLUE);
-  lv_arc_set_rotation(ring, 270);
-  lv_arc_set_range(ring, 0, 360);
-  lv_arc_set_value(ring, 0);
+  ring = Smooth_Arc_Create(scr, RING_RADIUS, RING_WIDTH, COLOR_BLUE);
 
-  ring_tip = Plain_Box(scr, RING_WIDTH, RING_WIDTH);
-  lv_obj_set_style_radius(ring_tip, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(ring_tip, COLOR_BLUE, 0);
-  lv_obj_set_style_bg_opa(ring_tip, LV_OPA_COVER, 0);
-  lv_obj_add_flag(ring_tip, LV_OBJ_FLAG_HIDDEN);
   lv_timer_create(Ring_Frame, RING_FRAME_MS, NULL);
 
-  spinner = Edge_Arc(scr, COLOR_AMBER);
+  spinner = Smooth_Arc_Create(scr, RING_RADIUS, RING_WIDTH, COLOR_AMBER);
   lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
   spinner_timer = lv_timer_create(Spinner_Tick, 30, NULL);
   lv_timer_pause(spinner_timer);
@@ -688,7 +653,6 @@ void Nav_Screen_Create(void)
 
   // The map band's edge fade would otherwise paint over the ring where they overlap
   lv_obj_move_foreground(ring);
-  lv_obj_move_foreground(ring_tip);
   lv_obj_move_foreground(spinner);
 
   stale_veil = Plain_Box(scr, LV_PCT(100), LV_PCT(100));
