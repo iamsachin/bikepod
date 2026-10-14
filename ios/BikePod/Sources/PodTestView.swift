@@ -11,6 +11,8 @@ struct PodTestView: View {
     @State private var metres: Double = 400
     @State private var road = "MG Road"
     @State private var approach: Task<Void, Never>?
+    /// Optional Open-Meteo API key (Keychain); empty = the free service
+    @State private var weatherKey = Keychain.string(Weather.keyName) ?? ""
 
     private var connected: Bool { link.state == .connected }
 
@@ -32,6 +34,19 @@ struct PodTestView: View {
                     Text("Navigation")
                 } footer: {
                     Text("Voice: spoken turn instructions from the phone (also on the speaker button while navigating). Lock screen & Dynamic Island: the next turn while the phone is locked or in another app; off saves battery on long rides.")
+                }
+                Section {
+                    SecureField("API key (optional)", text: $weatherKey)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: weatherKey) { _, key in
+                            Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), for: Weather.keyName)
+                        }
+                } header: {
+                    Text("Weather")
+                } footer: {
+                    Text("Rain ahead on the pod's journey page comes from Open-Meteo, free without a key for personal use. With a key from an Open-Meteo plan, its customer service is used. The key is kept in the iPhone's Keychain.")
                 }
                 Section {
                     Toggle("Simulate rides", isOn: $navigator.simulateRides)

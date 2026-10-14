@@ -5,6 +5,7 @@ import FerrostarCoreFFI
 import Foundation
 import Network
 import Observation
+import UIKit
 import QuartzCore
 
 /// Turn-by-turn guidance: Valhalla plans the route, Ferrostar follows the GPS along it,
@@ -109,6 +110,12 @@ final class Navigator {
     @ObservationIgnored private var linesSentForConnection = -1
     private let mapFeed = MapFeed()
     private let hazards = Hazards()
+    /// Fuel stations along the route (journey page: the next one) and rain ahead
+    private let fuelStations = Hazards(.fuel)
+    private let weather = Weather()
+    @ObservationIgnored private var thenLine = ""          // "THEN|L|35": the turn after next, when close
+    @ObservationIgnored private var fuelLine = ""          // "FUELNEXT|4100"
+    @ObservationIgnored private var rainLine = ""          // "RAIN|20" (-1 none, 0 now)
     @ObservationIgnored private var limitLine = ""         // latest "LIMIT|50" (0 = not known here)
     @ObservationIgnored private var bumpLine = ""          // latest "BUMP|85" (0 = none close)
     /// Sees Valhalla's raw answers on their way into Ferrostar, to keep the junction details
@@ -328,6 +335,11 @@ final class Navigator {
         limitLine = ""
         bumpLine = ""
         hazards.clear()
+        fuelStations.clear()
+        weather.clear()
+        thenLine = ""
+        fuelLine = ""
+        rainLine = ""
         rerouting = false
         rerouteHeldUntil = .distantPast
         puckMotion = nil
@@ -430,6 +442,17 @@ final class Navigator {
             turnLine = "\(dir.rawValue)|\(distanceToTurn)|\(road)"
         }
 
+        // The turn after this one, when it comes right after (pod: "then ↰"): the next step's own
+        // instruction describes the maneuver at its end, and the step's length is the gap
+        thenLine = "THEN|0"
+        if let steps = state.remainingSteps, steps.count >= 2, steps[1].distance <= 150,
+           let next = steps[1].visualInstructions.first?.primaryContent, next.maneuverType != .arrive {
+            let letter: String
+            if Self.isRoundabout(next.maneuverType) { letter = "O" }
+            else { letter = Self.podDirection(type: next.maneuverType, modifier: next.maneuverModifier).rawValue }
+            thenLine = "THEN|\(letter)|\(Int(steps[1].distance.rounded()))"
+        }
+
         // Log each new maneuver (not every distance update)
         let maneuverKey = turnLine.split(separator: "|").enumerated().filter { $0.offset != 1 }.map(\.element).joined(separator: "|")
         if maneuverKey != lastLoggedManeuver {
@@ -470,6 +493,7 @@ final class Navigator {
         if state.routeGeometry.count != pathRouteCount {   // new route: forget the old position
             pathRouteCount = state.routeGeometry.count
             hazards.load(route: state.routeGeometry)
+            fuelStations.load(route: state.routeGeometry)
             pathAlong = nil
         }
         let junctions = core?.route.map { junctionCapture.junctions(forRouteDistance: $0.distance) } ?? []
@@ -483,6 +507,11 @@ final class Navigator {
                                          metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
                                          junctions: junctions) {
             pathAlong = result.along
+            // Next fuel station along the route, and rain ahead (journey page)
+            fuelLine = "FUELNEXT|\(fuelStations.next(after: result.along).map { Int($0.rounded()) } ?? 0)"
+            weather.update(rider: rider, route: state.routeGeometry, along: result.along,
+                           metresLeft: progress.distanceRemaining, secondsLeft: progress.durationRemaining)
+            rainLine = weather.known ? "RAIN|\(weather.minutesToRain ?? -1)" : ""
             // Next mapped speed breaker, if one is close
             let toBump = hazards.next(after: result.along).flatMap { $0 <= 200 ? $0 : nil }
             // ...and where it is on the pod's map (area frame), so the pod can draw a line to it
@@ -546,7 +575,7 @@ final class Navigator {
 
     /// What the pod should be showing right now, as (kind, line) pairs (see BLE_Link.h on the pod).
     private var podLines: [(kind: String, line: String)] {
-        [("clock", timeLine), ("speed", speedLine), ("night", nightLine)] + screenLines
+        [("clock", timeLine), ("speed", speedLine), ("night", nightLine), ("phonebat", phoneBatteryLine)] + screenLines
     }
 
     /// Whether it's dark where the rider is, for the pod's Auto brightness: night once the sun is
@@ -558,6 +587,15 @@ final class Navigator {
             if elevation < -3 { isNight = true } else if elevation > -1 { isNight = false }
         }
         return "NIGHT|\(isNight ? 1 : 0)"
+    }
+
+    /// The phone's battery, for the pod (journey page, and a warning at 20% or less)
+    private var phoneBatteryLine: String {
+        let device = UIDevice.current
+        if !device.isBatteryMonitoringEnabled { device.isBatteryMonitoringEnabled = true }
+        guard device.batteryLevel >= 0 else { return "" }                  // unknown (simulator)
+        let charging = device.batteryState == .charging || device.batteryState == .full
+        return "PHONEBAT|\(Int((device.batteryLevel * 100).rounded()))|\(charging ? 1 : 0)"
     }
 
     /// The phone's local time, to set the pod's clock (it keeps time when the phone is away)
@@ -577,7 +615,7 @@ final class Navigator {
             // Turn first (the pod zooms from the turn distance), poses before the route (the pod
             // anchors the route to the latest pose)
             return [("turn", turnLine), ("pose", poseLine), ("path", pathLine), ("trip", tripLine),
-                    ("limit", limitLine), ("bump", bumpLine)]
+                    ("limit", limitLine), ("bump", bumpLine), ("then", thenLine), ("fuel", fuelLine), ("rain", rainLine)]
                 .filter { !$0.line.isEmpty }
         case .arrived:
             let minutes = Int((Date().timeIntervalSince(tripStartedAt) / 60).rounded())
