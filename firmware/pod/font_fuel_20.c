@@ -1,7 +1,7 @@
 /*******************************************************************************
- * Size: 14 px
+ * Size: 20 px
  * Bpp: 4
- * Opts: --font /Users/sachin/Desktop/learn/bircle/temp/fonts/material/MaterialIconsRound-Regular.otf -r 0xE546 --size 14 --bpp 4 --format lvgl --no-compress --lv-include lvgl.h -o font_fuel_14.c
+ * Opts: --font /Users/sachin/Desktop/learn/bircle/temp/fonts/material/MaterialIconsRound-Regular.otf -r 0xE546 --size 20 --bpp 4 --format lvgl --no-compress --lv-include lvgl.h -o font_fuel_20.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -10,11 +10,11 @@
 #include "lvgl.h"
 #endif
 
-#ifndef FONT_FUEL_14
-#define FONT_FUEL_14 1
+#ifndef FONT_FUEL_20
+#define FONT_FUEL_20 1
 #endif
 
-#if FONT_FUEL_14
+#if FONT_FUEL_20
 
 /*-----------------
  *    BITMAPS
@@ -23,14 +23,21 @@
 /*Store the image of the glyphs*/
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     /* U+E546 "" */
-    0x3, 0x33, 0x30, 0x0, 0x0, 0xaf, 0xff, 0xfb,
-    0x8, 0x0, 0xe5, 0x0, 0x4f, 0x8, 0xb0, 0xe4,
-    0x0, 0x3f, 0xa, 0xc8, 0xe6, 0x22, 0x5f, 0xe,
-    0x5d, 0xef, 0xff, 0xff, 0x4, 0xad, 0xef, 0xff,
-    0xff, 0xd7, 0xd, 0xef, 0xff, 0xff, 0xd, 0xd,
-    0xef, 0xff, 0xff, 0xd, 0xd, 0xef, 0xff, 0xff,
-    0xd, 0xd, 0xdf, 0xff, 0xfe, 0xa, 0xc8, 0x23,
-    0x33, 0x32, 0x0, 0x20
+    0x6, 0x99, 0x99, 0x96, 0x0, 0x0, 0x0, 0x7,
+    0xff, 0xff, 0xff, 0xf8, 0x1d, 0x20, 0x0, 0xaf,
+    0x30, 0x0, 0x3f, 0xa0, 0xae, 0x20, 0xa, 0xf0,
+    0x0, 0x0, 0xfa, 0x1, 0xee, 0x30, 0xaf, 0x0,
+    0x0, 0xf, 0xa0, 0xdc, 0xcd, 0xa, 0xf0, 0x0,
+    0x0, 0xfa, 0xf, 0x55, 0xf1, 0xaf, 0xee, 0xee,
+    0xef, 0xa0, 0x8f, 0xff, 0x1a, 0xff, 0xff, 0xff,
+    0xfc, 0x20, 0x36, 0xf1, 0xaf, 0xff, 0xff, 0xff,
+    0xff, 0xc0, 0x2f, 0x1a, 0xff, 0xff, 0xff, 0xfb,
+    0x1f, 0x22, 0xf1, 0xaf, 0xff, 0xff, 0xff, 0xa0,
+    0xf2, 0x2f, 0x1a, 0xff, 0xff, 0xff, 0xfa, 0xf,
+    0x22, 0xf1, 0xaf, 0xff, 0xff, 0xff, 0xa0, 0xf2,
+    0x2f, 0x1a, 0xff, 0xff, 0xff, 0xfa, 0xf, 0x55,
+    0xf0, 0x9f, 0xff, 0xff, 0xff, 0x90, 0x8f, 0xf8,
+    0x0, 0x44, 0x44, 0x44, 0x40, 0x0, 0x22, 0x0
 };
 
 
@@ -40,7 +47,7 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
 
 static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0} /* id = 0 reserved */,
-    {.bitmap_index = 0, .adv_w = 224, .box_w = 10, .box_h = 12, .ofs_x = 2, .ofs_y = 1}
+    {.bitmap_index = 0, .adv_w = 320, .box_w = 15, .box_h = 16, .ofs_x = 3, .ofs_y = 2}
 };
 
 /*---------------------
@@ -92,14 +99,14 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
 
 /*Initialize a public general font descriptor*/
 #if LV_VERSION_CHECK(8, 0, 0)
-const lv_font_t font_fuel_14 = {
+const lv_font_t font_fuel_20 = {
 #else
-lv_font_t font_fuel_14 = {
+lv_font_t font_fuel_20 = {
 #endif
     .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,    /*Function pointer to get glyph's data*/
     .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,    /*Function pointer to get glyph's bitmap*/
-    .line_height = 12,          /*The maximum line height required by the font*/
-    .base_line = -1,             /*Baseline measured from the bottom of the line*/
+    .line_height = 16,          /*The maximum line height required by the font*/
+    .base_line = -2,             /*Baseline measured from the bottom of the line*/
 #if !(LVGL_VERSION_MAJOR == 6 && LVGL_VERSION_MINOR == 0)
     .subpx = LV_FONT_SUBPX_NONE,
 #endif
@@ -112,5 +119,5 @@ lv_font_t font_fuel_14 = {
 
 
 
-#endif /*#if FONT_FUEL_14*/
+#endif /*#if FONT_FUEL_20*/
 

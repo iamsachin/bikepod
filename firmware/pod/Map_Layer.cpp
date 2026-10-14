@@ -67,9 +67,9 @@ static const uint32_t road_color[4] = { 0, 0x4A4A4A, 0x3A3A3A, 0x2C2C2C };
 #define COLOR_ROUTE     0xD6D6D6
 #define COLOR_ROUTE_DONE 0x262626
 
-LV_FONT_DECLARE(font_fuel_14);       // Material Icons Round "local_gas_station" only
+LV_FONT_DECLARE(font_fuel_20);       // Material Icons Round "local_gas_station" only
 #define FUEL_GLYPH  "\xEE\x95\x86"      // U+E546 in UTF-8
-#define FUEL_BADGE  20                    // badge diameter, px
+#define FUEL_BADGE  30                    // badge diameter, px (20 was hard to spot at a glance)
 
 static lv_obj_t *layer;
 static lv_coord_t center_x, center_y;   // where the rider's marker is, inside the layer
@@ -1057,7 +1057,7 @@ static void Draw_Event(lv_event_t *e)
     badge.border_opa = LV_OPA_COVER;
     lv_draw_label_dsc_t icon;
     lv_draw_label_dsc_init(&icon);
-    icon.font = &font_fuel_14;
+    icon.font = &font_fuel_20;
     icon.color = lv_color_hex(0xF2B544);
     const lv_coord_t br = FUEL_BADGE / 2;
     for (uint8_t i = 0; i < active->fuel_count; i++) {
@@ -1068,8 +1068,8 @@ static void Draw_Event(lv_event_t *e)
       if (fade_on && (sx < r.box.x1 || sx > r.box.x2 || sy < r.box.y1 || sy > r.box.y2 ||
                       Pixel_Fade(Row_Fade(sy), sx) > 100)) continue;
       lv_draw_rect(ctx, &badge, &area);
-      lv_area_t glyph = { (lv_coord_t)(sx - 7), (lv_coord_t)(sy - font_fuel_14.line_height / 2),
-                          (lv_coord_t)(sx + 7), (lv_coord_t)(sy + font_fuel_14.line_height / 2) };
+      lv_area_t glyph = { (lv_coord_t)(sx - 10), (lv_coord_t)(sy - font_fuel_20.line_height / 2),
+                          (lv_coord_t)(sx + 10), (lv_coord_t)(sy + font_fuel_20.line_height / 2) };
       lv_draw_label(ctx, &icon, &glyph, FUEL_GLYPH, NULL);
     }
     map_perf_fuel_us += micros() - t0;
