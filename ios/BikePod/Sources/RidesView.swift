@@ -104,9 +104,17 @@ struct RideDetailView: View {
                         stat("Max lean left", ride.maxLeanLeft.map { "\($0)°" } ?? "–")
                         stat("Max lean right", ride.maxLeanRight.map { "\($0)°" } ?? "–")
                     }
+                    GridRow {
+                        stat("Peak pull", ride.peakAccelG.map { String(format: "%.2f g", $0) } ?? "–")
+                        stat("Peak braking", ride.peakBrakeG.map { String(format: "%.2f g", $0) } ?? "–")
+                    }
+                    GridRow {
+                        stat("Peak cornering", ride.peakCorneringG.map { String(format: "%.2f g", $0) } ?? "–")
+                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    }
                 }
                 if ride.maxLeanLeft == nil {
-                    Text("Lean is measured by the pod, so it shows when the pod was connected.")
+                    Text("Lean and g are measured by the pod, so they show when the pod was connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

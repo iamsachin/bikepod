@@ -16,6 +16,10 @@ struct Ride: Codable, Identifiable, Hashable {
     /// Deepest lean each side, from the pod (nil when the pod wasn't connected)
     var maxLeanLeft: Int?
     var maxLeanRight: Int?
+    /// Strongest pull, braking and cornering, g (from the pod; nil when it wasn't connected)
+    var peakAccelG: Double? = nil
+    var peakBrakeG: Double? = nil
+    var peakCorneringG: Double? = nil
     /// Reached the destination (rather than ending the ride early)
     var arrived: Bool
     /// A replayed route, not a real ride
@@ -64,10 +68,14 @@ final class RideRecorder {
         ride.end = now
     }
 
-    /// The pod's deepest lean each side in the last couple of seconds
-    func lean(left: Int, right: Int) {
+    /// The pod's deepest lean each side, and (if it sent them) its strongest pull, braking and
+    /// cornering g, in the last couple of seconds
+    func lean(left: Int, right: Int, accel: Double? = nil, brake: Double? = nil, cornering: Double? = nil) {
         ride.maxLeanLeft = max(ride.maxLeanLeft ?? 0, left)
         ride.maxLeanRight = max(ride.maxLeanRight ?? 0, right)
+        if let accel { ride.peakAccelG = max(ride.peakAccelG ?? 0, accel) }
+        if let brake { ride.peakBrakeG = max(ride.peakBrakeG ?? 0, brake) }
+        if let cornering { ride.peakCorneringG = max(ride.peakCorneringG ?? 0, cornering) }
     }
 
     func finish(arrived: Bool) -> Ride {

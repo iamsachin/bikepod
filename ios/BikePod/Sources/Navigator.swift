@@ -119,11 +119,13 @@ final class Navigator {
         // A pod that has just (re)connected, e.g. restarted when the bike's power came back:
         // bring it up to date now rather than at the next 1 s update
         link.onConnected { [weak self] in self?.updatePod() }
-        // The pod's deepest lean in the last 2 s, for the ride history
+        // The pod's deepest lean and strongest g in the last 2 s, for the ride history
+        // (LEAN|left|right|accel|brake|cornering; older pods send only the lean)
         link.onEvent { [weak self] line in
             let fields = line.split(separator: "|")
-            guard fields.count == 3, fields[0] == "LEAN", let left = Int(fields[1]), let right = Int(fields[2]) else { return }
-            self?.recorder?.lean(left: left, right: right)
+            guard fields.count >= 3, fields[0] == "LEAN", let left = Int(fields[1]), let right = Int(fields[2]) else { return }
+            let g = fields.count >= 6 ? fields[3...5].map { Double($0) } : [nil, nil, nil]
+            self?.recorder?.lean(left: left, right: right, accel: g[0], brake: g[1], cornering: g[2])
         }
         podFeed = Task { [weak self] in
             while !Task.isCancelled {

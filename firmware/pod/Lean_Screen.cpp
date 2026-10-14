@@ -93,6 +93,7 @@ static uint32_t gps_accel_ms = 0;
 static float peak_accel = 0, peak_decel = 0, peak_lat_l = 0, peak_lat_r = 0;
 // This trip's peaks, for the ride summary at arrival (reset when a trip starts)
 static float ride_lean_l = 0, ride_lean_r = 0, ride_g = 0;
+static float report_accel = 0, report_brake = 0, report_lat = 0;   // since the last LEAN report
 static float motion_hist_lat[MOTION_HISTORY], motion_hist_lon[MOTION_HISTORY];
 static uint8_t motion_head = 0;
 static float graph_lean = 0;      // lean filtered for the graph (~0.5 s), so it draws as a smooth curve
@@ -190,8 +191,9 @@ static void Sample(lv_timer_t *timer)
   if (lean > max_right) max_right = lean;
   if (-lean > max_left) max_left = -lean;
 
-  // The deepest lean each side since the last report, for the app's ride history: sent every
-  // 2 s while moving (standing still, the reading is just how the bike is parked)
+  // The deepest lean each side and the strongest pull, braking and cornering g since the last
+  // report, for the app's ride history: sent every 2 s while moving (standing still, the lean
+  // reading is just how the bike is parked). The g peaks are gathered below (report_* statics).
   static float peak_left = 0, peak_right = 0;
   static uint32_t reported_ms = 0;
   peak_right = fmaxf(peak_right, lean);
@@ -199,11 +201,13 @@ static void Sample(lv_timer_t *timer)
   if (lv_tick_elaps(reported_ms) >= 2000) {
     reported_ms = lv_tick_get();
     if (v > MOVING_MPS) {
-      char line[24];
-      snprintf(line, sizeof(line), "LEAN|%d|%d", (int)lroundf(peak_left), (int)lroundf(peak_right));
+      char line[48];
+      snprintf(line, sizeof(line), "LEAN|%d|%d|%.2f|%.2f|%.2f", (int)lroundf(peak_left), (int)lroundf(peak_right),
+               report_accel, report_brake, report_lat);
       BLE_Link_Notify(line);
     }
     peak_left = peak_right = 0;
+    report_accel = report_brake = report_lat = 0;
   }
 
   // Acceleration. Readings smoothed over ~0.15 s (engine buzz and bumps); lateral only on the
@@ -221,6 +225,9 @@ static void Sample(lv_timer_t *timer)
   }
   if (v > 1.0f) {                                      // peaks only while riding
     ride_g = fmaxf(ride_g, fmaxf(fabsf(motion_lon), fabsf(motion_lat)));
+    report_accel = fmaxf(report_accel, motion_lon);
+    report_brake = fmaxf(report_brake, -motion_lon);
+    report_lat = fmaxf(report_lat, fabsf(motion_lat));
     peak_accel = fmaxf(peak_accel, motion_lon);
     peak_decel = fminf(peak_decel, motion_lon);
     peak_lat_r = fmaxf(peak_lat_r, motion_lat);
