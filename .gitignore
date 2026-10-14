@@ -16,3 +16,20 @@ tools/screenshots/
 
 # Personal project notes (kept locally, not in git)
 PROJECT.md
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Firmware build output, if compiled into the repo
+*.bin
+*.elf
+*.map
+
+# Local Claude Code settings
+.claude/settings.local.json
