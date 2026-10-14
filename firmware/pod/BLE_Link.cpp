@@ -143,6 +143,12 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
   if (kind == "BUMP") {
     msg->kind = MSG_BUMP;
     msg->distance_m = Field(text, 1).toInt();
+    // BUMP|85|area|x|y: also where it is on the map (pose[2] = 1 when given)
+    bool spot = Field(text, 4).length() > 0;
+    msg->area_id = spot ? Field(text, 2).toInt() : 0;
+    msg->pose[0] = spot ? Field(text, 3).toFloat() : 0;
+    msg->pose[1] = spot ? Field(text, 4).toFloat() : 0;
+    msg->pose[2] = spot ? 1 : 0;
     return true;
   }
   if (kind == "SPD") {

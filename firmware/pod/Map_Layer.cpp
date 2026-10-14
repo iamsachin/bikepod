@@ -689,7 +689,7 @@ static inline void Solid_Range(int32_t start, int32_t step, float inv_step, int3
 // In IRAM: running from flash, the loop's code kept being evicted from the cache it shares with PSRAM
 // One copy of the loop per kind of line (casing blend or not, darkening mask or lightening, edge
 // fade or not): with every case in one loop it ran out of registers and spilled to memory
-template <bool CASING, bool DARKEN, bool FADE>
+template <bool CASING, bool DARKEN, bool FADE, bool OVER = false>
 IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color);
 
 IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color)
@@ -707,7 +707,7 @@ IRAM_ATTR static void Capsule2(const Raster &r, Pt a, Pt b, float half, lv_color
   }
 }
 
-template <bool CASING, bool DARKEN, bool FADE>
+template <bool CASING, bool DARKEN, bool FADE, bool OVER>
 IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_color_t color, float core, lv_color_t edge_color)
 {
   const float reach = half + 0.6f;                  // how far from the line a pixel centre can be touched
@@ -821,6 +821,9 @@ IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_c
         if (cover > mask_row[x]) mask_row[x] = (uint8_t)LV_MIN(cover, 255u);
         return;
       }
+      // Overlays (the breaker line) are painted over what's there, so they keep their colour on
+      // the light route; they are thin and their few joints don't show the double blend
+      if (OVER) { row[x] = cover >= 250 ? col : lv_color_mix(col, row[x], (lv_opa_t)cover); return; }
       row[x] = Lighten(row[x], cover >= 250 ? col : Scale(col, cover));
     };
 
@@ -843,6 +846,8 @@ IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_c
         if (cover <= 4) continue;
         if (DARKEN) {
           if (cover > mask_row[x]) mask_row[x] = (uint8_t)cover;
+        } else if (OVER) {
+          row[x] = cover >= 250 ? color : lv_color_mix(color, row[x], (lv_opa_t)cover);
         } else {
           row[x] = row[x].full == 0 ? lit : Lighten(row[x], lit);
         }
@@ -852,6 +857,13 @@ IRAM_ATTR static void Capsule_Kind(const Raster &r, Pt a, Pt b, float half, lv_c
     }
     for (; x <= rx2; x++, across += step_across, along += step_along) edge_pixel(x, across, along);
   }
+}
+
+// A plain line painted over the picture (see OVER in Capsule_Kind)
+static void Capsule_Over(const Raster &r, Pt a, Pt b, float half, lv_color_t color)
+{
+  if (fade_on) Capsule_Kind<false, false, true, true>(r, a, b, half, color, half, color);
+  else Capsule_Kind<false, false, false, true>(r, a, b, half, color, half, color);
 }
 
 // Draws a polyline (area metres, offset by ox, oy) as capsules; `from` replaces the first point
@@ -904,6 +916,62 @@ static void Draw_Route(const Raster &r)
     Capsule2(r, split_pt, here, behind + extra, back, behind + extra, back);
     Polyline(r, rest, rest_n, ox, oy, &here, ahead + extra, front, ahead + extra, front);
     if (pass == 0) Apply_Casing_Mask(r);
+  }
+}
+
+/* The next speed breaker (within 200 m): a thin amber line along the route from the rider to it,
+   and a short bar across the route at it, each with a dark hairline edge so they stand out on
+   the light route. The phone sends the breaker's spot in an area's frame. */
+static bool bump_on = false;
+static uint16_t bump_area;
+static float bump_x, bump_y;
+
+void Map_Layer_Set_Bump(bool on, uint16_t area_id, float x, float y)
+{
+  bool changed = on != bump_on || (on && (area_id != bump_area || x != bump_x || y != bump_y));
+  bump_on = on;
+  bump_area = area_id;
+  bump_x = x;
+  bump_y = y;
+  if (changed && layer) lv_obj_invalidate(layer);
+}
+
+static void Draw_Bump(const Raster &r)
+{
+  float ox, oy, bx, by;
+  if (!bump_on || route_count < 2 || !has_route || !Convert(route_area, route_ox, route_oy, active->id, &ox, &oy) ||
+      !Convert(bump_area, bump_x, bump_y, active->id, &bx, &by)) return;
+  float s_cam, s_bump;
+  Nearest_On_Route(cam_x - ox, cam_y - oy, &s_cam);
+  if (Nearest_On_Route(bx - ox, by - oy, &s_bump) > 20.0f * 20.0f || s_bump <= s_cam) return;
+
+  // The stretch from the rider to the breaker, in screen pixels
+  static Pt pts[ROUTE_MAX];                             // static: 2 KB is a lot for the draw task's stack
+  uint16_t n = 0;
+  float x, y;
+  Route_Point(s_cam, &x, &y);
+  pts[n++] = To_Screen(&r.box, ox + x, oy + y);
+  for (uint16_t i = 0; i < route_count && n < ROUTE_MAX - 1; i++)
+    if (route_along[i] > s_cam && route_along[i] < s_bump) pts[n++] = To_Screen(&r.box, ox + route[i][0], oy + route[i][1]);
+  Route_Point(s_bump, &x, &y);
+  Pt end = To_Screen(&r.box, ox + x, oy + y);
+  pts[n++] = end;
+
+  // The bar: across the route's direction just before the breaker
+  float ax, ay;
+  Route_Point(s_bump - 3, &ax, &ay);
+  Pt before = To_Screen(&r.box, ox + ax, oy + ay);
+  float dx = end.x - before.x, dy = end.y - before.y, len = sqrtf(dx * dx + dy * dy);
+  if (len < 0.01f) { dx = 0; dy = -1; len = 1; }
+  const float bar = 13;                                // px either side of the route
+  Pt b1 = { end.x - dy / len * bar, end.y + dx / len * bar }, b2 = { end.x + dy / len * bar, end.y - dx / len * bar };
+
+  lv_color_t dark = lv_color_hex(0x1A1200), amber = lv_color_hex(0xF5B83D);
+  for (int pass = 0; pass < 2; pass++) {               // dark edge first, then amber on top
+    float half = pass == 0 ? 3.0f : 1.8f, bar_half = pass == 0 ? 3.6f : 2.4f;
+    lv_color_t col = pass == 0 ? dark : amber;
+    for (uint16_t i = 0; i + 1 < n; i++) Capsule_Over(r, pts[i], pts[i + 1], half, col);
+    Capsule_Over(r, b1, b2, bar_half, col);
   }
 }
 
@@ -1009,6 +1077,7 @@ static void Draw_Event(lv_event_t *e)
 
   t0 = micros();
   Draw_Route(r);
+  Draw_Bump(r);
   map_perf_route_us += micros() - t0;
 }
 

@@ -27,6 +27,8 @@ void Map_Layer_Set_Turn_Distance(float metres);
 // Route, whole metres in a map area's frame
 void Map_Layer_Set_Route(uint16_t area_id, const int16_t (*pts)[2], uint8_t count);
 void Map_Layer_Clear_Route(void);
+// The next speed breaker's spot (area frame, metres), drawn as an amber line to it; on = false: none
+void Map_Layer_Set_Bump(bool on, uint16_t area_id, float x, float y);
 bool Map_Layer_Has_Map(void);
 void Map_Layer_Clear(void);                                  // forget pose, route and turn (phone gone)
 void Map_Layer_Set_Visible(bool visible);                    // false while another page covers the map

@@ -18,7 +18,8 @@
 //   POSE|7|120,-405,853       rider in area 7's frame: x, y and heading in tenths (metres, degrees)
 //   SPD|123                   GPS speed in tenths of a metre per second (lean estimate, speed shown)
 //   LIMIT|50                  speed limit where the rider is, km/h (0 = not known)
-//   BUMP|85                   metres to the next mapped speed breaker (0 = none close)
+//   BUMP|85|7|120|-40         metres to the next mapped speed breaker (0 = none close); optionally
+//                             where it is: area 7, x 120, y -40 metres (the map draws a line to it)
 //   TIME|16|32|05             the phone's local time (sets the pod's clock)
 //   REROUTE|detail            off route, a new route is being fetched ("Finding a new route" / "No internet")
 //   ARRIVED|7.3|29|Cafe       trip finished: kilometres, minutes, destination

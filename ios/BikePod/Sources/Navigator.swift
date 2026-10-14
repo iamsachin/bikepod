@@ -420,8 +420,15 @@ final class Navigator {
                                          junctions: junctions) {
             pathAlong = result.along
             // Next mapped speed breaker, if one is close
-            let toBump = hazards.next(after: result.along)
-            bumpLine = "BUMP|\(toBump.map { $0 <= 200 ? Int($0.rounded()) : 0 } ?? 0)"
+            let toBump = hazards.next(after: result.along).flatMap { $0 <= 200 ? $0 : nil }
+            // ...and where it is on the pod's map (area frame), so the pod can draw a line to it
+            if let toBump, let frame = mapFeed.frame,
+               let spot = Hazards.coordinate(on: state.routeGeometry, atAlong: result.along + toBump) {
+                let p = frame.project(spot.lat, spot.lng)
+                bumpLine = "BUMP|\(Int(toBump.rounded()))|\(mapFeed.areaID)|\(Int(p.x.rounded()))|\(Int(p.y.rounded()))"
+            } else {
+                bumpLine = "BUMP|\(toBump.map { Int($0.rounded()) } ?? 0)"
+            }
             // Route for the pod's map, in the map area's fixed frame (whole metres from the area's
             // reference point): the same route gives the same numbers every update, so it doesn't
             // wobble the way points relative to the moving rider did

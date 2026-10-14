@@ -49,6 +49,24 @@ final class Hazards {
         along.first { $0 > position + 3 }.map { $0 - position }
     }
 
+    /// The point `s` metres along the route (the same flat projection as the breakers' distances)
+    static func coordinate(on route: [GeographicCoordinate], atAlong s: Double) -> (lat: Double, lng: Double)? {
+        guard route.count >= 2 else { return nil }
+        let ref = route[0]
+        let mLat = 110_540.0, mLng = 111_320.0 * cos(ref.lat * .pi / 180)
+        var travelled = 0.0
+        for i in 0..<(route.count - 1) {
+            let a = route[i], b = route[i + 1]
+            let length = hypot((b.lng - a.lng) * mLng, (b.lat - a.lat) * mLat)
+            if travelled + length >= s {
+                let t = length > 0 ? (s - travelled) / length : 0
+                return (a.lat + t * (b.lat - a.lat), a.lng + t * (b.lng - a.lng))
+            }
+            travelled += length
+        }
+        return nil
+    }
+
     /// Breakers around the route: from the disk cache when an earlier fetch covered this box,
     /// otherwise from Overpass (and then remembered)
     private static func breakers(around route: [GeographicCoordinate]) async -> [(lat: Double, lng: Double)]? {
