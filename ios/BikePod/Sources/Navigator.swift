@@ -409,7 +409,12 @@ final class Navigator {
             pathAlong = nil
         }
         let junctions = core?.route.map { junctionCapture.junctions(forRouteDistance: $0.distance) } ?? []
-        if let rider = state.preferredUserLocation?.coordinates,
+        // The pod's map follows the raw GPS position (PathShape projects it onto the whole route):
+        // Ferrostar's snapped position stays pinned at the corner until the next instruction
+        // starts and then jumps ~25 m, which threw the pod's arrow off the route at turns
+        var rider = state.preferredUserLocation?.coordinates
+        if case let .navigating(_, raw, _, _, _, _, _, _, _, _, _) = state.tripState { rider = raw.coordinates }
+        if let rider,
            let result = PathShape.around(rider: rider, route: state.routeGeometry,
                                          metresToTurn: progress.distanceToNextManeuver, previousAlong: pathAlong,
                                          junctions: junctions) {

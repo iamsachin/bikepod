@@ -284,6 +284,23 @@ static void Predict(uint32_t now, float *x, float *y, float *h)
       return;
     }
   }
+  // Diagnostics: why the prediction isn't following the route (at most once a second)
+  static uint32_t logged_ms = 0;
+  if (has_route && route_count >= 2 && lv_tick_elaps(logged_ms) > 1000) {
+    logged_ms = lv_tick_get();
+    float cx, cy, s0;
+    if (!Convert(route_area, route_ox, route_oy, active->id, &cx, &cy)) {
+      printf("MAP: off-route prediction: route area %u, screen area %u (no conversion)\r\n", route_area, active->id);
+    } else {
+      float d2 = Nearest_On_Route(pose_x - cx, pose_y - cy, &s0);
+      printf("MAP: off-route prediction: pose %.0f m from the route (pose area %u, route area %u, screen %u, %u points)\r\n",
+             sqrtf(d2), last_pose.area, route_area, active->id, route_count);
+      // The route and pose themselves, to plot (area frame, metres)
+      printf("MAP: pose %.1f,%.1f heading %.0f; route", pose_x, pose_y, last_pose.heading);
+      for (uint16_t i = 0; i < route_count; i++) printf(" %.0f,%.0f", cx + route[i][0], cy + route[i][1]);
+      printf("\r\n");
+    }
+  }
   float k = PREDICT_SPEED;
   *x = pose_x + last_pose.vx * k * dt;
   *y = pose_y + last_pose.vy * k * dt;
