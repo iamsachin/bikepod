@@ -24,6 +24,8 @@
 	<string>BikePod uses Bluetooth to send turn directions to your handlebar display.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>BikePod uses your location to guide you along the route.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

@@ -23,7 +23,9 @@ targets:
     sources:
       - Sources
       - Resources
+      - Shared
     dependencies:
+      - target: BikePodWidgets        # the Live Activity (lock screen, Dynamic Island)
       - package: Ferrostar
         product: FerrostarCore
       - package: Ferrostar
@@ -45,6 +47,7 @@ targets:
         NSBluetoothAlwaysUsageDescription: BikePod uses Bluetooth to send turn directions to your handlebar display.
         NSLocationWhenInUseUsageDescription: BikePod uses your location to guide you along the route.
         UIBackgroundModes: [bluetooth-central, location]
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sachinrajput.bikepod
@@ -56,3 +59,27 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: ${APPLE_DEVELOPER_TEAM_ID}
+
+  BikePodWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widgets
+      - Shared
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: BikePod
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sachinrajput.bikepod.widgets
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: ${APPLE_DEVELOPER_TEAM_ID}
+        SKIP_INSTALL: YES

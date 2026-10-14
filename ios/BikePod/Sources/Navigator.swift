@@ -68,6 +68,8 @@ final class Navigator {
     let history = RideHistory()
     @ObservationIgnored private var recorder: RideRecorder?
     @ObservationIgnored private var arrivedRide: Ride?
+    /// The trip on the lock screen and in the Dynamic Island
+    @ObservationIgnored private let liveActivity = TripActivityController()
 
     /// Updated as fixes arrive (reading the provider directly didn't refresh the screen)
     private(set) var hasGPS = false
@@ -265,6 +267,9 @@ final class Navigator {
             tripKm = route.distance / 1000
             lastTrip = nil
             recorder = RideRecorder(destination: destinationName, simulated: simulate)
+            liveActivity.start(destination: destinationName,
+                               arrival: Date().addingTimeInterval(route.steps.reduce(0) { $0 + $1.duration }),
+                               kmLeft: route.distance / 1000)
             arrivedRide = nil
             simulating = simulate
             simulatedSpeed = 0
@@ -294,6 +299,7 @@ final class Navigator {
 
     func stop() {
         finishRide(arrived: false)           // ended before arriving (after arriving it's already saved)
+        liveActivity.end(arrived: false)
         routeRequestID = UUID()
         stateWatch = nil
         core?.stopNavigation()
@@ -343,6 +349,9 @@ final class Navigator {
                 // The distance actually ridden (detours included), else the route's
                 let ride = finishRide(arrived: true)
                 arrivedRide = ride
+                liveActivity.end(arrived: true, destinationState: TripActivityAttributes.ContentState(
+                    symbol: "flag.checkered", distance: "", road: destinationName, arrival: Date(), kmLeft: 0,
+                    rerouting: false, arrived: true))
                 let ridden = ride?.km ?? 0
                 lastTrip = (ridden > 0 ? ridden : tripKm, Date().timeIntervalSince(tripStartedAt))
             }
@@ -422,6 +431,25 @@ final class Navigator {
         // Arrival time, km left, the route's total and seconds riding (for the pod's journey screen)
         tripLine = String(format: "TRIP|%@|%.1f|%.1f|%d", Self.clockFormat.string(from: eta), remainingKm,
                           tripKm, Int(Date().timeIntervalSince(tripStartedAt)))
+
+        // Lock screen and Dynamic Island
+        let symbol: String
+        if content.roundaboutExitDegrees != nil, Self.isRoundabout(content.maneuverType) {
+            symbol = "arrow.triangle.turn.up.right.circle"
+        } else if content.maneuverType == .arrive {
+            symbol = "flag.checkered"
+        } else {
+            switch Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier) {
+            case .left: symbol = "arrow.turn.up.left"
+            case .right: symbol = "arrow.turn.up.right"
+            default: symbol = "arrow.up"
+            }
+        }
+        let metres = Int((Double(distanceToTurn) / 10).rounded()) * 10      // 995 m rounds to "1.0 km", not "1000 m"
+        let distance = metres < 1000 ? "\(metres) m" : String(format: "%.1f km", Double(distanceToTurn) / 1000)
+        liveActivity.update(TripActivityAttributes.ContentState(
+            symbol: rerouting ? "arrow.triangle.2.circlepath" : symbol, distance: distance,
+            road: Self.shortRoadName(content.text), arrival: eta, kmLeft: remainingKm, rerouting: rerouting, arrived: false))
 
         if state.routeGeometry.count != pathRouteCount {   // new route: forget the old position
             pathRouteCount = state.routeGeometry.count
