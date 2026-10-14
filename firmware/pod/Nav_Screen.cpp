@@ -22,7 +22,7 @@ LV_FONT_DECLARE(font_big_104);    // Barlow Bold, digits and "." only
 LV_FONT_DECLARE(font_title_44);   // Barlow SemiBold, ASCII + middle dot
 LV_FONT_DECLARE(font_text_32);    // Barlow SemiBold, ASCII + middle dot
 LV_FONT_DECLARE(font_small_26);
-LV_FONT_DECLARE(font_then_30);   // Barlow SemiBold, ASCII + middle dot
+LV_FONT_DECLARE(font_then_30);   // Material turn glyphs: left, right, straight, roundabout, U-turns
 
 #define COLOR_BLUE      lv_color_hex(0x3D7BF7)
 #define COLOR_TEXT      lv_color_hex(0xFFFFFF)
@@ -492,6 +492,16 @@ static void Icon_Set(Turn_Dir dir, int16_t degrees, uint8_t exit_number)
     float stem[4] = { 40, HEAD_ARROW_H - 6, 40, 26 };
     memcpy(s.cap[0], stem, sizeof(stem));
     Icon_Head(s, 40, 4, 0, -1, 22, 15);
+  } else if (dir == TURN_UTURN_RIGHT || dir == TURN_UTURN_LEFT) {
+    // U-turn to the right (left is its mirror): up, over a half-circle, back down to a head
+    s.mirror = dir == TURN_UTURN_LEFT;
+    s.cap_hw = hw; s.caps = 2;
+    float up[4] = { 18, HEAD_ARROW_H - 6, 18, 30 }, down[4] = { 58, 30, 58, 40 };
+    memcpy(s.cap[0], up, sizeof(up));
+    memcpy(s.cap[1], down, sizeof(down));
+    s.has_arc = true; s.arc_cx = 38; s.arc_cy = 30; s.arc_r = 20; s.arc_hw = hw;
+    s.arc_start = 180; s.arc_sweep = 180;            // left point -> over the top -> right point
+    Icon_Head(s, 58, 66, 0, 1, 22, 15);
   } else {
     // Right turn (left is its mirror): up, round a quarter-circle bend, right to a filled head
     s.mirror = dir == TURN_LEFT;
@@ -808,9 +818,10 @@ void Nav_Screen_Set_Limit(uint32_t kmh)
 
 void Nav_Screen_Set_Then(char dir, uint32_t gap_m)
 {
-  // Material Icons Round: turn_left, turn_right, straight, roundabout
+  // Material Icons Round: turn_left, turn_right, straight, roundabout, u_turn_right, u_turn_left
   const char *glyph = dir == 'L' ? "\xEE\xAE\xA6" : dir == 'R' ? "\xEE\xAE\xAB" :
-                      dir == 'S' ? "\xEE\xAD\x95" : dir == 'O' ? "\xEE\xAE\xA3" : NULL;
+                      dir == 'S' ? "\xEE\xAD\x95" : dir == 'O' ? "\xEE\xAE\xA3" :
+                      dir == 'U' ? "\xEE\xAE\xA2" : dir == 'V' ? "\xEE\xAE\xA1" : NULL;
   if (glyph) Set_Text(then_icon, glyph);
   bool show = glyph != NULL;
   if (show == lv_obj_has_flag(then_pill, LV_OBJ_FLAG_HIDDEN)) Show_If(then_pill, show);

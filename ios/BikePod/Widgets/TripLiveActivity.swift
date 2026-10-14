@@ -14,7 +14,7 @@ struct TripLiveActivity: Widget {
             let state = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: state.symbol)
+                    TurnImage(symbol: state.symbol)
                         .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(state.rerouting ? .orange : .blue)
                         .padding(.leading, 4)
@@ -35,15 +35,28 @@ struct TripLiveActivity: Widget {
                     .padding(.trailing, 4)
                 }
             } compactLeading: {
-                Image(systemName: state.symbol)
+                TurnImage(symbol: state.symbol)
                     .foregroundStyle(state.rerouting ? .orange : .blue)
             } compactTrailing: {
                 Text(state.arrived ? "Here" : state.distance)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
             } minimal: {
-                Image(systemName: state.symbol).foregroundStyle(.blue)
+                TurnImage(symbol: state.symbol).foregroundStyle(.blue)
             }
+        }
+    }
+}
+
+/// The turn's SF Symbol. There is no right-hand U-turn symbol, so that one is the left one mirrored.
+private struct TurnImage: View {
+    let symbol: String
+
+    var body: some View {
+        if symbol == TripActivityAttributes.uTurnRight {
+            Image(systemName: "arrow.uturn.down").scaleEffect(x: -1, y: 1)
+        } else {
+            Image(systemName: symbol)
         }
     }
 }
@@ -54,7 +67,7 @@ private struct LockScreenView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: state.symbol)
+            TurnImage(symbol: state.symbol)
                 .font(.system(size: 38, weight: .bold))
                 .foregroundStyle(state.rerouting ? .orange : state.arrived ? .red : .blue)
                 .frame(width: 48)

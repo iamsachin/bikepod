@@ -5,6 +5,7 @@ import Observation
 /// Turn direction, encoded as the first letter of the pod message.
 enum TurnDir: String {
     case left = "L", right = "R", straight = "S"
+    case uTurnRight = "U", uTurnLeft = "V"     // U-turns, by the side they swing round
 }
 
 /// Bluetooth LE link to the handlebar pod (see firmware/pod/BLE_Link.h).

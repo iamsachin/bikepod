@@ -481,6 +481,8 @@ final class Navigator {
             switch Self.podDirection(type: content.maneuverType, modifier: content.maneuverModifier) {
             case .left: symbol = "arrow.turn.up.left"
             case .right: symbol = "arrow.turn.up.right"
+            case .uTurnRight: symbol = TripActivityAttributes.uTurnRight
+            case .uTurnLeft: symbol = "arrow.uturn.down"
             default: symbol = "arrow.up"
             }
         }
@@ -700,16 +702,24 @@ final class Navigator {
         }
     }
 
-    /// The pod only draws left / right / straight arrows (and roundabouts, above).
+    /// The pod draws left / right / straight arrows and U-turns (and roundabouts, above).
     private static func podDirection(type: ManeuverType?, modifier: ManeuverModifier?) -> TurnDir {
         if type == .arrive { return .straight }
         switch modifier {
         case .left, .slightLeft, .sharpLeft: return .left
         case .right, .slightRight, .sharpRight: return .right
-        case .uTurn: return .right   // India drives on the left, so U-turns swing right
+        case .uTurn: return drivesOnLeft ? .uTurnRight : .uTurnLeft
         case .straight, .none: return .straight
         }
     }
+
+    /// U-turns swing round away from the kerb: right where traffic keeps left (India). The route
+    /// doesn't say which side, so the phone's region decides.
+    private static let drivesOnLeft: Bool = {
+        let left: Set<String> = ["IN", "GB", "IE", "JP", "AU", "NZ", "ZA", "SG", "MY", "TH", "ID", "LK", "BD",
+                                 "NP", "PK", "HK", "MO", "KE", "UG", "TZ", "CY", "MT", "BT", "MU"]
+        return left.contains(Locale.current.region?.identifier ?? "IN")
+    }()
 
     /// Word endings shortened the way car navigators do, so names fit the pod's two lines.
     private static let abbreviations = [

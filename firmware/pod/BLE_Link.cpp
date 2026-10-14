@@ -243,12 +243,14 @@ static bool Parse_Message(const String &text, Nav_Message *msg)
     return true;
   }
 
-  // Turn: L|400|MG Rd
+  // Turn: L|400|MG Rd (L, R, S, or U / V for a U-turn to the right / left)
   if (kind.length() != 1) return false;
   switch (toupper(kind[0])) {
     case 'L': msg->dir = TURN_LEFT; break;
     case 'R': msg->dir = TURN_RIGHT; break;
     case 'S': msg->dir = TURN_STRAIGHT; break;
+    case 'U': msg->dir = TURN_UTURN_RIGHT; break;   // U-turn swinging right (keep-left countries)
+    case 'V': msg->dir = TURN_UTURN_LEFT; break;
     default:  return false;
   }
   msg->kind = MSG_TURN;
