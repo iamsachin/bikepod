@@ -36,7 +36,7 @@ LV_FONT_DECLARE(font_missed_28);
 #define ICON_PREVIOUS   "\xEE\x81\x85"      // U+E045
 #define ICON_PLAYING    "\xEE\x86\xB8"      // U+E1B8 sound bars
 
-static lv_obj_t *call_root, *call_name;
+static lv_obj_t *call_root, *call_name, *call_caption;
 static lv_obj_t *music_root, *music_top, *music_title, *music_artist, *music_none;
 static lv_obj_t *music_row, *music_elapsed, *music_bar, *music_fill, *music_left;
 static lv_obj_t *music_controls, *music_icon;
@@ -72,6 +72,34 @@ static void Show_If(lv_obj_t *obj, bool show)
   if (show) lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
+
+// `text` in at most `lines` lines of `width` px, ending in "..." if it had to be cut (LVGL's own
+// dots didn't appear on these wrapped labels: the text just stopped mid-word)
+static void Set_Text_Lines(lv_obj_t *label, const char *text, const lv_font_t *font, lv_coord_t width, int lines)
+{
+  static char out[160];
+  lv_coord_t max_h = lines * lv_font_get_line_height(font);
+  lv_point_t size;
+  lv_txt_get_size(&size, text, font, 0, 0, width, LV_TEXT_FLAG_NONE);
+  if (size.y <= max_h) {
+    strlcpy(out, text, sizeof(out));
+  } else {
+    // The longest start (whole UTF-8 characters) that still fits with "..." after it
+    size_t lo = 0, hi = strlen(text);
+    while (lo < hi) {
+      size_t mid = (lo + hi + 1) / 2;
+      while (mid > 0 && (text[mid] & 0xC0) == 0x80) mid--;            // don't split a character
+      if (mid <= lo) { hi = lo; break; }
+      snprintf(out, sizeof(out), "%.*s...", (int)mid, text);
+      lv_txt_get_size(&size, out, font, 0, 0, width, LV_TEXT_FLAG_NONE);
+      if (size.y <= max_h) lo = mid; else hi = mid - 1;
+    }
+    while (lo > 0 && text[lo - 1] == ' ') lo--;                          // no space before the dots
+    snprintf(out, sizeof(out), "%.*s...", (int)lo, text);
+  }
+  if (strcmp(lv_label_get_text(label), out) != 0) lv_label_set_text(label, out);
+}
+
 
 // "1:14"
 static void Format_Time(char *out, size_t size, float seconds)
@@ -254,14 +282,14 @@ static void Call_Create(void)
   lv_obj_center(icon);
 
   call_name = Label(call_root, &font_title_44, lv_color_white());
-  lv_obj_set_width(call_name, 400);
-  lv_label_set_long_mode(call_name, LV_LABEL_LONG_DOT);
-  lv_obj_align(call_name, LV_ALIGN_CENTER, 0, 64);
+  lv_obj_set_width(call_name, 380);
+  lv_label_set_long_mode(call_name, LV_LABEL_LONG_WRAP);   // cut with "..." by Set_Text_Lines
+  lv_obj_align(call_name, LV_ALIGN_TOP_MID, 0, 282);
 
-  lv_obj_t *caption = Label(call_root, &font_small_26, COLOR_DIM);
-  lv_obj_set_style_text_letter_space(caption, 3, 0);
-  lv_label_set_text(caption, "INCOMING CALL");
-  lv_obj_align(caption, LV_ALIGN_CENTER, 0, 112);
+  call_caption = Label(call_root, &font_small_26, COLOR_DIM);
+  lv_obj_set_style_text_letter_space(call_caption, 3, 0);
+  lv_label_set_text(call_caption, "INCOMING CALL");
+  lv_obj_align_to(call_caption, call_name, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
 
   lv_obj_add_flag(call_root, LV_OBJ_FLAG_HIDDEN);
 }
@@ -359,7 +387,7 @@ static void Music_Refresh(const Phone_State &s)
     char *p = strstr(title, cut);
     if (p && p != title) *p = 0;
   }
-  Set_Text(music_title, title);
+  Set_Text_Lines(music_title, title, &font_title_44, 380, 2);
   Set_Text(music_artist, s.artist);
 
   float elapsed = s.elapsed_s + s.rate * (millis() - s.elapsed_ms) / 1000.0f;
@@ -401,7 +429,7 @@ static void Missed_Click(lv_event_t *e)
   Phone_Notify_Get(&s);
   char text[80];
   snprintf(text, sizeof(text), "Missed call " MIDDLE_DOT " %s", s.missed_caller[0] ? s.missed_caller : "Unknown");
-  lv_label_set_text(lv_obj_get_child(missed_toast, 0), text);
+  Set_Text_Lines(lv_obj_get_child(missed_toast, 0), text, &font_small_26, 320, 1);
   lv_obj_clear_flag(missed_toast, LV_OBJ_FLAG_HIDDEN);
   toast_until = millis() + 3000;
   Phone_Notify_Clear_Missed();
@@ -431,9 +459,6 @@ static void Missed_Create(void)
   lv_obj_t *label = lv_label_create(missed_toast);
   lv_obj_set_style_text_font(label, &font_small_26, 0);
   lv_obj_set_style_text_color(label, COLOR_RED, 0);
-  lv_obj_set_width(label, LV_SIZE_CONTENT);
-  lv_obj_set_style_max_width(label, 340, 0);
-  lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
   lv_obj_add_flag(missed_toast, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -473,6 +498,22 @@ static void Note_Update(const Phone_State &s)
   if (show == lv_obj_has_flag(note_btn, LV_OBJ_FLAG_HIDDEN)) Show_If(note_btn, show);
 }
 
+// The caller's name: big if it fits, else the smaller font; at most two lines ("..." after)
+static void Call_Set_Name(const char *name)
+{
+  static char shown_name[80] = "";
+  if (strcmp(shown_name, name) == 0) return;
+  strlcpy(shown_name, name, sizeof(shown_name));
+  const lv_font_t *font = strlen(name) > 16 ? &font_text_32 : &font_title_44;
+  lv_obj_set_style_text_font(call_name, font, 0);
+  lv_point_t size;
+  lv_txt_get_size(&size, name, font, 0, 0, 380, LV_TEXT_FLAG_NONE);
+  lv_coord_t line = lv_font_get_line_height(font);
+  lv_obj_set_height(call_name, LV_MIN(size.y, 2 * line));
+  Set_Text_Lines(call_name, name, font, 380, 2);
+  lv_obj_align_to(call_caption, call_name, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+}
+
 static void Tick(lv_timer_t *timer)
 {
   Phone_State s;
@@ -489,7 +530,7 @@ static void Tick(lv_timer_t *timer)
     // The map underneath stops redrawing while the call covers it
     Map_Layer_Set_Visible(Pages_Nav_Visible());
   }
-  if (ringing) Set_Text(call_name, s.caller[0] ? s.caller : "Unknown caller");
+  if (ringing) Call_Set_Name(s.caller[0] ? s.caller : "Unknown caller");
   Note_Update(s);
   Missed_Update(s);
 

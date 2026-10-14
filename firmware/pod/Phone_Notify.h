@@ -12,9 +12,9 @@
 struct Phone_State {
   uint32_t version;         // goes up whenever anything below changes
   bool call_ringing;
-  char caller[48];          // UTF-8, as iOS gives it (contact name or number)
+  char caller[64];          // UTF-8, as iOS gives it (contact name or number)
   bool missed_call;         // a call was missed (until tapped on the pod or cleared on the phone)
-  char missed_caller[48];
+  char missed_caller[64];
   bool media_playing;
   char title[64];
   char artist[48];

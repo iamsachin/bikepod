@@ -557,6 +557,8 @@ static void Set_Info(lv_obj_t *icon, const char *top, const char *main, const lv
   Show_If(info_sub, sub[0]);
   Show_If(info_detail, detail[0]);
   Show_If(summary_grid, icon == icon_target);
+  // The ride summary makes the column tall: nudge it down, clear of the status row's icons
+  lv_obj_set_style_pad_top(info_group, icon == icon_target ? 22 : 0, 0);
 }
 
 /********************************** Soft edges **********************************/
@@ -678,8 +680,8 @@ void Nav_Screen_Create(void)
   summary_grid = Plain_Box(info_group, 330, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(summary_grid, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_flex_align(summary_grid, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-  lv_obj_set_style_pad_row(summary_grid, 10, 0);
-  lv_obj_set_style_pad_top(summary_grid, 14, 0);
+  lv_obj_set_style_pad_row(summary_grid, 4, 0);
+  lv_obj_set_style_pad_top(summary_grid, 8, 0);
   auto stat = [](const char *caption) {
     lv_obj_t *cell = Plain_Box(summary_grid, 160, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
@@ -731,7 +733,9 @@ void Nav_Screen_Show_Rerouting(const char *detail)
 void Nav_Screen_Show_Arrived(float trip_km, uint32_t trip_min, float avg_kmh, float top_kmh, const char *place)
 {
   char summary[40];
-  snprintf(summary, sizeof(summary), "%.1f km " MIDDLE_DOT " %lu min", trip_km, (unsigned long)trip_min);
+  if (trip_min < 60) snprintf(summary, sizeof(summary), "%.1f km " MIDDLE_DOT " %lu min", trip_km, (unsigned long)trip_min);
+  else snprintf(summary, sizeof(summary), "%.1f km " MIDDLE_DOT " %lu h %lu min", trip_km,
+                (unsigned long)(trip_min / 60), (unsigned long)(trip_min % 60));
   have_trip = false;
   if (mode != MODE_ARRIVED) {
     Set_Mode(MODE_ARRIVED);

@@ -66,9 +66,11 @@ void Phone_Notify_Get(Phone_State *out)
 
 static void Copy_Value(char *dst, size_t size, const uint8_t *src, size_t len)
 {
-  size_t n = len < size - 1 ? len : size - 1;
+  bool cut = len > size - 1;
+  size_t n = cut ? size - 4 : len;                            // room for "..." when cut
   while (n > 0 && n < len && (src[n] & 0xC0) == 0x80) n--;   // don't cut a UTF-8 character
   memcpy(dst, src, n);
+  if (cut) memcpy(dst + n, "...", 3), n += 3;
   dst[n] = 0;
 }
 
@@ -113,7 +115,7 @@ static void Data_Source(BLERemoteCharacteristic *, uint8_t *data, size_t len, bo
   if ((uid != call_uid && uid != missed_uid) || data[5] != 1) return;
   size_t value_len = data[6] | data[7] << 8;
   if (value_len > len - 8) value_len = len - 8;
-  static char name[48];
+  static char name[64];
   Copy_Value(name, sizeof(name), data + 8, value_len);
   if (uid == missed_uid) {
     Changed([](Phone_State &s) { strlcpy(s.missed_caller, name, sizeof(s.missed_caller)); });
@@ -226,8 +228,8 @@ static void Worker(void *)
       if (remote_command) remote_command->writeValue(&command, 1, true);
       LOG("PHONE: media command %u\r\n", command);
     } else if (control_point) {
-      uint8_t cmd[] = { 0, (uint8_t)uid, (uint8_t)(uid >> 8), (uint8_t)(uid >> 16), (uint8_t)(uid >> 24), 1, 40, 0 };
-      control_point->writeValue(cmd, sizeof(cmd), true);   // Title, up to 40 bytes
+      uint8_t cmd[] = { 0, (uint8_t)uid, (uint8_t)(uid >> 8), (uint8_t)(uid >> 16), (uint8_t)(uid >> 24), 1, 63, 0 };
+      control_point->writeValue(cmd, sizeof(cmd), true);   // Title, up to 63 bytes
     }
   }
   control_point = NULL;
@@ -243,8 +245,8 @@ void Phone_Notify_Clear_Missed(void)
 
 void Phone_Notify_Fake_Missed(const char *name)
 {
-  static char copy[48];
-  strlcpy(copy, name, sizeof(copy));
+  static char copy[64];
+  Copy_Value(copy, sizeof(copy), (const uint8_t *)name, strlen(name));
   Changed([](Phone_State &s) { s.missed_call = true; strlcpy(s.missed_caller, copy, sizeof(s.missed_caller)); });
 }
 
@@ -274,8 +276,8 @@ void Phone_Notify_Media_Command(Media_Command command)
 /************************************ Testing ************************************/
 void Phone_Notify_Fake_Call(const char *name)
 {
-  static char copy[48];
-  strlcpy(copy, name, sizeof(copy));
+  static char copy[64];
+  Copy_Value(copy, sizeof(copy), (const uint8_t *)name, strlen(name));
   Changed([](Phone_State &s) { s.call_ringing = copy[0]; strlcpy(s.caller, copy, sizeof(s.caller)); });
 }
 

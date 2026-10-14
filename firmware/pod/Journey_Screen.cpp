@@ -114,7 +114,8 @@ void Journey_Set_Rain(int minutes)
   char text[16];
   if (minutes < 0) strcpy(text, "Dry");
   else if (minutes == 0) strcpy(text, "Raining");
-  else snprintf(text, sizeof(text), "in %d min", minutes);
+  else if (minutes < 60) snprintf(text, sizeof(text), "in %d min", minutes);
+  else snprintf(text, sizeof(text), "in %d h", (minutes + 30) / 60);    // "in 115 min" ran into the ring
   Set_Text(rain_val, text);
   lv_obj_set_style_text_color(rain_icon, minutes >= 0 && minutes <= 30 ? COLOR_BLUE : COLOR_DIM, 0);
   Show_Cell(rain_cell, true);
@@ -222,10 +223,12 @@ void Journey_Screen_Create(lv_obj_t *parent)
   eta_label = Stat(row, "ARRIVE");
   avg_label = Stat(row, "AVG");
 
-  lv_obj_t *info = Box(trip_group, 360, LV_SIZE_CONTENT);
+  // Only as wide as its contents, centred: the round screen is narrow this low down
+  lv_obj_t *info = Box(trip_group, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(info, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(info, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 378);
+  lv_obj_set_flex_align(info, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(info, 16, 0);
+  lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 372);
   phone_cell = Info_Cell(info, ICON_PHONE, COLOR_GREY, &phone_icon, &phone_val);
   lv_obj_t *fuel_icon;
   fuel_cell = Info_Cell(info, ICON_FUEL, COLOR_AMBER, &fuel_icon, &fuel_val);
