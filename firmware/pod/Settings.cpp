@@ -6,6 +6,8 @@
 #include "Settings.h"
 #include <Arduino.h>
 #include <Preferences.h>
+#include "Clock.h"
+#include <math.h>
 #include <stdio.h>
 #include "Display_ST7701.h"
 #include "Lean_Screen.h"
@@ -21,15 +23,23 @@ LV_FONT_DECLARE(font_small_26);
 #define COLOR_DIM       lv_color_hex(0x6A6A6A)
 #define COLOR_GREEN     lv_color_hex(0x2FA352)
 
-static const uint8_t BRIGHTNESS[4] = { 25, 50, 75, 100 };
-static const char *BRIGHTNESS_NAME[4] = { "Low", "Mid", "High", "Max" };
+// Auto (the fifth): full brightness by day, dimmed at night (from the sun's height where the
+// phone is; without the phone, the pod's own clock: 7 pm to 6 am)
+#define STEPS           5
+#define STEP_AUTO       4
+#define NIGHT_LEVEL     30
+static const uint8_t BRIGHTNESS[STEPS] = { 25, 50, 75, 100, 100 };
+static const char *BRIGHTNESS_NAME[STEPS] = { "Low", "Mid", "High", "Max", "Auto" };
 
 static Preferences prefs;
 static bool clock_24h = false;               // 12 h unless changed
 static uint8_t brightness_step = 3;
 
 static lv_obj_t *panel;
-static lv_obj_t *clock_btn[2], *bright_btn[4], *cal_label;
+static lv_obj_t *clock_btn[2], *bright_btn[STEPS], *cal_label;
+static bool phone_night = false;
+static uint32_t phone_night_ms = 0;          // when the phone last said (0 = never)
+static float backlight = -1;                 // what the backlight is at now (fades to the target)
 static bool panel_open = false;
 
 /********************************* Settings *********************************/
@@ -37,8 +47,33 @@ void Settings_Init(void)
 {
   prefs.begin("pod", false);
   clock_24h = prefs.getBool("clock24", false);
-  brightness_step = LV_MIN(prefs.getUChar("bright", 3), 3);
-  Set_Backlight(BRIGHTNESS[brightness_step]);
+  brightness_step = LV_MIN(prefs.getUChar("bright", 3), STEP_AUTO);
+  backlight = BRIGHTNESS[brightness_step];
+  Set_Backlight((uint8_t)backlight);
+}
+
+void Settings_Set_Night(bool night)
+{
+  phone_night = night;
+  phone_night_ms = millis() | 1;
+}
+
+static bool Is_Night(void)
+{
+  if (phone_night_ms && millis() - phone_night_ms < 15 * 60 * 1000) return phone_night;
+  uint8_t h, m, s;
+  if (!Clock_Get(&h, &m, &s)) return false;          // no idea: stay bright
+  return h >= 19 || h < 6;
+}
+
+// Fades the backlight to where it should be (Auto changes it at dusk and dawn)
+static void Backlight_Tick(lv_timer_t *timer)
+{
+  float target = brightness_step == STEP_AUTO ? (Is_Night() ? NIGHT_LEVEL : 100) : BRIGHTNESS[brightness_step];
+  if (backlight == target) return;
+  float step = 2.5f;                                  // per 50 ms: 0 to 100 in 2 s
+  backlight = fabsf(target - backlight) <= step ? target : backlight + (target > backlight ? step : -step);
+  Set_Backlight((uint8_t)lroundf(backlight));
 }
 
 void Settings_Format_Clock(const char *hhmm, char *out, size_t size)
@@ -60,7 +95,7 @@ static void Style_Pill(lv_obj_t *btn, bool selected)
 static void Refresh_Choices(void)
 {
   for (int i = 0; i < 2; i++) Style_Pill(clock_btn[i], (i == 1) == clock_24h);
-  for (int i = 0; i < 4; i++) Style_Pill(bright_btn[i], i == brightness_step);
+  for (int i = 0; i < STEPS; i++) Style_Pill(bright_btn[i], i == brightness_step);
 }
 
 static lv_obj_t *Pill(lv_obj_t *parent, lv_coord_t w, const char *text, lv_event_cb_t cb, intptr_t value)
@@ -114,8 +149,7 @@ static void Clock_Cb(lv_event_t *e)
 static void Bright_Cb(lv_event_t *e)
 {
   brightness_step = (uint8_t)(intptr_t)lv_event_get_user_data(e);
-  prefs.putUChar("bright", brightness_step);
-  Set_Backlight(BRIGHTNESS[brightness_step]);
+  prefs.putUChar("bright", brightness_step);       // the backlight fades there (Backlight_Tick)
   Refresh_Choices();
 }
 
@@ -178,7 +212,11 @@ void Settings_Panel_Create(lv_obj_t *parent)
 
   Caption(panel, "Brightness", 210, COLOR_DIM);
   row = Row(panel, 244, 400);
-  for (int i = 0; i < 4; i++) bright_btn[i] = Pill(row, 94, BRIGHTNESS_NAME[i], Bright_Cb, i);
+  // Five fit with the smaller font
+  for (int i = 0; i < STEPS; i++) {
+    bright_btn[i] = Pill(row, 76, BRIGHTNESS_NAME[i], Bright_Cb, i);
+    lv_obj_set_style_text_font(lv_obj_get_child(bright_btn[i], 0), &font_small_26, 0);
+  }
 
   row = Row(panel, 328, 290);
   lv_obj_t *cal = Pill(row, 290, "", Cal_Cb, 0);
@@ -188,6 +226,7 @@ void Settings_Panel_Create(lv_obj_t *parent)
   Caption(panel, "Swipe up to close", 406, COLOR_DIM);
 
   Refresh_Choices();
+  lv_timer_create(Backlight_Tick, 50, NULL);
   lv_obj_set_y(panel, -LV_VER_RES);
   lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }

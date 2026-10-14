@@ -6,6 +6,8 @@
 // swipe down from the top of any screen to open it, swipe up to close.
 
 void Settings_Init(void);                       // loads the settings and applies the brightness
+// The phone says whether it's dark where the rider is (brightness Auto dims at night)
+void Settings_Set_Night(bool night);
 void Settings_Panel_Create(lv_obj_t *parent);
 void Settings_Panel_Show(bool show);            // slides down / up
 bool Settings_Panel_Open(void);

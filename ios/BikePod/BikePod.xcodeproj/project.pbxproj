@@ -25,6 +25,7 @@
 		986E97582A2FA574DDA76FD3 /* MapArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C76E28EF65BA10A60CC07C /* MapArea.swift */; };
 		9C323B85F2D92DCB1000E41B /* Navigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BF76FF181C22E9399ED1D6 /* Navigator.swift */; };
 		9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B8E3DEB099F516B18C47F /* VectorTile.swift */; };
+		A678246EB7AD01BD7C79419C /* Sun.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62A27F92695E5849DA78ECB /* Sun.swift */; };
 		ACE4B5ABBE9C11A2CB331857 /* FerrostarMapLibreUI in Frameworks */ = {isa = PBXBuildFile; productRef = 614B092DB1664A8DF012AEC7 /* FerrostarMapLibreUI */; };
 		B148A68C2D7AD5510A7F9FDC /* JunctionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADF3C7FA650E4CFE35E1FD1 /* JunctionCapture.swift */; };
 		B6FBA9E91250F60664322253 /* BikePodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93925A49563DA8E4074636DC /* BikePodApp.swift */; };
@@ -57,6 +58,7 @@
 		DF8B8E3DEB099F516B18C47F /* VectorTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorTile.swift; sourceTree = "<group>"; };
 		E16B1117B4E5FF5B1D498373 /* PathShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathShape.swift; sourceTree = "<group>"; };
 		E4E0ED73B96AF10E66AD1326 /* Hazards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Hazards.swift; sourceTree = "<group>"; };
+		F62A27F92695E5849DA78ECB /* Sun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sun.swift; sourceTree = "<group>"; };
 		FADF3C7FA650E4CFE35E1FD1 /* JunctionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JunctionCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -98,6 +100,7 @@
 				1C92ADD0D9B5BC0859C192C5 /* RidesView.swift */,
 				5B34CF55DF8CE23B787F5A8C /* RouteLayer.swift */,
 				74D8E66DB2B4F43D12555384 /* RoutePuck.swift */,
+				F62A27F92695E5849DA78ECB /* Sun.swift */,
 				DF8B8E3DEB099F516B18C47F /* VectorTile.swift */,
 			);
 			path = Sources;
@@ -230,6 +233,7 @@
 				6A55083AA5A0A852459455E1 /* RidesView.swift in Sources */,
 				209543603BFE68B8710630C5 /* RouteLayer.swift in Sources */,
 				98470BEA77A833DB4085DA1B /* RoutePuck.swift in Sources */,
+				A678246EB7AD01BD7C79419C /* Sun.swift in Sources */,
 				9E6F66EF65830BD25FC7A871 /* VectorTile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

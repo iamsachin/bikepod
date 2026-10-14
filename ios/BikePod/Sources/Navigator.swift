@@ -482,7 +482,18 @@ final class Navigator {
 
     /// What the pod should be showing right now, as (kind, line) pairs (see BLE_Link.h on the pod).
     private var podLines: [(kind: String, line: String)] {
-        [("clock", timeLine), ("speed", speedLine)] + screenLines
+        [("clock", timeLine), ("speed", speedLine), ("night", nightLine)] + screenLines
+    }
+
+    /// Whether it's dark where the rider is, for the pod's Auto brightness: night once the sun is
+    /// 3 degrees below the horizon, day again at 1 degree below (so it doesn't flicker at dusk)
+    @ObservationIgnored private var isNight = false
+    private var nightLine: String {
+        if let here = device?.lastLocation?.coordinates {
+            let elevation = Sun.elevation(lat: here.lat, lng: here.lng)
+            if elevation < -3 { isNight = true } else if elevation > -1 { isNight = false }
+        }
+        return "NIGHT|\(isNight ? 1 : 0)"
     }
 
     /// The phone's local time, to set the pod's clock (it keeps time when the phone is away)

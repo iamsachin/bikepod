@@ -67,6 +67,7 @@ static void Pod_Tick(lv_timer_t *timer)
         Nav_Screen_Set_Bump(msg.distance_m);
         Map_Layer_Set_Bump(msg.distance_m > 0 && msg.pose[2] > 0, msg.area_id, msg.pose[0], msg.pose[1]);
         break;
+      case MSG_NIGHT:   Settings_Set_Night(msg.distance_m != 0); break;
       case MSG_TIME:    Clock_Set(msg.elapsed_s / 3600, msg.elapsed_s / 60 % 60, msg.elapsed_s % 60); break;
       case MSG_POSE:    Nav_Screen_Set_Pose(msg.area_id, msg.pose[0], msg.pose[1], msg.pose[2]); break;
       case MSG_REROUTE: Nav_Screen_Show_Rerouting(msg.text); break;
